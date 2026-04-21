@@ -1,0 +1,10 @@
+[package]
+name = "marl"
+version = "0.2.1"
+edition = "2024"
+
+[dependencies]
+rand = "0.9"
+rand_distr = "0.5"
+rayon = "1.10"
+half = "2"
