@@ -103,3 +103,5 @@ The project is already a real simulation rather than a scaffold. Its current str
 If you use this software in your scholarly work, please attribute it with this citation:
 
 > Geosmin Jones. (2026). *Microbial Automata with Reaction-Diffusion and Lineage* (Version 0.2.0.1) [Desktop Software]. Github. https://github.com/alvertremantel/marl
+
+If you're publishing in a big kid venue, you're free to shoot me an email at geosminjones@gmail.com for my real name and Google Scholar profile. 
