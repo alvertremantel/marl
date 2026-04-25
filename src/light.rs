@@ -30,14 +30,11 @@ impl LightField {
         &mut self,
         field: &Field,
         cells: &HashMap<[u16; 3], usize>, // pos -> cell index (for density)
+        sim: &SimulationConfig,
     ) {
-        let surface_intensity = 1.0f32;
-        let cell_absorption: f32 = 0.3;  // absorption per cell per voxel
-        let chemical_absorption: f32 = 0.05; // absorption per unit of absorber species
-
         for y in 0..GRID_Y {
             for x in 0..GRID_X {
-                let mut intensity = surface_intensity;
+                let mut intensity = sim.surface_intensity;
 
                 for z in 0..GRID_Z {
                     self.data[Self::idx(x, y, z)] = intensity;
@@ -45,15 +42,15 @@ impl LightField {
                     // Attenuation from cells
                     let pos = [x as u16, y as u16, z as u16];
                     if cells.contains_key(&pos) {
-                        intensity *= (-cell_absorption).exp();
+                        intensity *= (-sim.cell_absorption).exp();
                     }
 
                     // Attenuation from chemical absorbers (e.g., organic waste = species 4)
                     let absorber = field.get(x, y, z, 4);
-                    intensity *= (-chemical_absorption * absorber).exp();
+                    intensity *= (-sim.chemical_absorption * absorber).exp();
 
                     // Floor to prevent denormals
-                    if intensity < 1e-7 { intensity = 0.0; }
+                    if intensity < sim.light_floor { intensity = 0.0; }
                 }
             }
         }

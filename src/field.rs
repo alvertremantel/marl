@@ -103,7 +103,7 @@ impl Field {
     /// The z-loop is embarrassingly parallel: each layer reads from the
     /// source buffer (immutable) and writes to its own slice of the
     /// scratch buffer. Rayon splits this across all available CPU cores.
-    fn diffusion_step_inner(&mut self, dt_sub: f32, occupancy: Option<&[bool]>) {
+    fn diffusion_step_inner(&mut self, dt_sub: f32, occupancy: Option<&[bool]>, sim: &SimulationConfig) {
         let src = &self.data;
         let layer_size = GRID_Y * GRID_X * S_EXT;
         let voxel_layer_size = GRID_Y * GRID_X;
@@ -134,7 +134,7 @@ impl Field {
 
                         // Niche construction: EPS deposits slow diffusion locally
                         let structural = Self::get_from(src, x, y, z, 7);
-                        let niche_factor = 1.0 - ALPHA_EPS * structural / (K_EPS + structural);
+                        let niche_factor = 1.0 - sim.alpha_eps * structural / (sim.k_eps + structural);
 
                         // Check which neighbors are occupied or walls.
                         // Occupied neighbors are treated identically to walls:
@@ -147,7 +147,7 @@ impl Field {
 
                         for s in 0..S_EXT {
                             let c = Self::get_from(src, x, y, z, s);
-                            let d = D_VOXEL[s] * niche_factor;
+                            let d = sim.d_voxel[s] * niche_factor;
 
                             // 6-neighbor Laplacian. Walls AND occupied neighbors
                             // both get Neumann treatment (use center value c).
@@ -165,7 +165,7 @@ impl Field {
                                      else { Self::get_from(src, x, y, z + 1, s) };
 
                             let laplacian = xm + xp + ym + yp + zm + zp - 6.0 * c;
-                            let decay = LAMBDA_DECAY[s] * c;
+                            let decay = sim.lambda_decay[s] * c;
                             let new_c = c + dt_sub * (d * laplacian - decay);
 
                             let local_idx = (y * GRID_X + x) * S_EXT + s;
@@ -187,33 +187,33 @@ impl Field {
     /// the physically correct model: cells are solid objects that displace
     /// the liquid phase. Interior cells in a dense colony are cut off
     /// from nutrients, creating natural carrying capacity.
-    pub fn diffuse_tick_with_cells(&mut self, occupancy: &[bool]) {
-        let dt_sub = DT / DIFFUSION_SUBSTEPS as f32;
-        for _ in 0..DIFFUSION_SUBSTEPS {
-            self.diffusion_step_inner(dt_sub, Some(occupancy));
+    pub fn diffuse_tick_with_cells(&mut self, occupancy: &[bool], sim: &SimulationConfig) {
+        let dt_sub = sim.dt / sim.diffusion_substeps as f32;
+        for _ in 0..sim.diffusion_substeps {
+            self.diffusion_step_inner(dt_sub, Some(occupancy), sim);
         }
     }
 
     #[allow(dead_code)] // TODO: occupancy-free version kept for testing/benchmarking
     /// Run a full tick of diffusion (multiple substeps for stability)
-    pub fn diffuse_tick(&mut self) {
-        let dt_sub = DT / DIFFUSION_SUBSTEPS as f32;
-        for _ in 0..DIFFUSION_SUBSTEPS {
-            self.diffusion_step_inner(dt_sub, None);
+    pub fn diffuse_tick(&mut self, sim: &SimulationConfig) {
+        let dt_sub = sim.dt / sim.diffusion_substeps as f32;
+        for _ in 0..sim.diffusion_substeps {
+            self.diffusion_step_inner(dt_sub, None, sim);
         }
     }
 
     /// Set boundary source terms (called once per tick before diffusion).
     /// Oxidant + carbon sourced from top (z=0), reductant from bottom (z=max).
     /// These are the only external inputs to the system — everything else is recycled.
-    pub fn apply_boundary_sources(&mut self) {
+    pub fn apply_boundary_sources(&mut self, sim: &SimulationConfig) {
         // Top face: oxidant (species 1) and carbon (species 3)
         for y in 0..GRID_Y {
             for x in 0..GRID_X {
                 let ox = self.get(x, y, 0, 1);
-                self.set(x, y, 0, 1, (ox + SOURCE_RATE_OXIDANT).min(C_MAX));
+                self.set(x, y, 0, 1, (ox + sim.source_rate_oxidant).min(sim.c_max));
                 let ca = self.get(x, y, 0, 3);
-                self.set(x, y, 0, 3, (ca + SOURCE_RATE_CARBON).min(C_MAX));
+                self.set(x, y, 0, 3, (ca + sim.source_rate_carbon).min(sim.c_max));
             }
         }
 
@@ -222,7 +222,7 @@ impl Field {
             for x in 0..GRID_X {
                 let z = GRID_Z - 1;
                 let re = self.get(x, y, z, 2);
-                self.set(x, y, z, 2, (re + SOURCE_RATE_REDUCTANT).min(C_MAX));
+                self.set(x, y, z, 2, (re + sim.source_rate_reductant).min(sim.c_max));
             }
         }
     }

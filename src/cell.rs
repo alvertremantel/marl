@@ -194,10 +194,11 @@ impl CellState {
         &mut self,
         ext_conc: &[f32; S_EXT],
         light: f32,
+        sim: &SimulationConfig,
     ) -> ([f32; S_EXT], CellEvent) {
         let mut field_deltas = [0.0f32; S_EXT];
         // Cell tick runs once per full tick
-        let dt = DT;
+        let dt = sim.dt;
 
         // === PHASE 1: RECEPTOR PASS ===
         // Activations modulate transport rates (not yet wired — future extension).
@@ -205,11 +206,11 @@ impl CellState {
         let mut _activation = [0.0f32; S_RECEPTORS];
         for i in 0..S_RECEPTORS {
             let r = &self.ruleset.receptors[i];
-            if i < S_EXT && r.gain.abs() > 1e-9 {
+            if i < S_EXT && r.gain.abs() > sim.active_reaction_threshold {
                 let c = ext_conc[i];
                 // Guard against negative/zero base in powf
                 let k = r.k_half.max(1e-6);
-                let n = r.n_hill.clamp(0.5, 8.0);
+                let n = r.n_hill.clamp(sim.hill_exponent_clamp_low, sim.hill_exponent_clamp_high);
                 let kn = k.powf(n);
                 let cn = c.max(0.0).powf(n);
                 _activation[i] = r.gain * cn / (kn + cn + 1e-9);
@@ -227,7 +228,7 @@ impl CellState {
             let secretion = tp.secrete_rate * self.internal[int_idx] / (1.0 + self.internal[int_idx]);
 
             self.internal[int_idx] = (self.internal[int_idx] + (uptake - secretion) * dt)
-                .clamp(0.0, C_MAX);
+                .clamp(0.0, sim.c_max);
             field_deltas[ext_idx] += (secretion - uptake) * dt;
         }
 
@@ -238,7 +239,7 @@ impl CellState {
 
         // === PHASE 3: INTRACELLULAR REACTIONS ===
         for rxn in &self.ruleset.reactions {
-            if rxn.v_max.abs() < 1e-9 { continue; } // inactive slot
+            if rxn.v_max.abs() < sim.active_reaction_threshold { continue; } // inactive slot
             if rxn.substrate == rxn.product { continue; } // no-op (e.g. energy→energy)
 
             let sub_idx = rxn.substrate as usize;
@@ -251,7 +252,7 @@ impl CellState {
 
             // Michaelis-Menten with epsilon background rate
             let substrate_term = s / (rxn.k_m + s + f32::EPSILON);
-            let catalyst_term = EPSILON + c / (rxn.k_cat + c + f32::EPSILON);
+            let catalyst_term = sim.epsilon + c / (rxn.k_cat + c + f32::EPSILON);
             let mut rate = rxn.v_max * substrate_term * catalyst_term;
 
             // Optional cofactor
@@ -269,31 +270,31 @@ impl CellState {
             // Clamp flux to available substrate — cannot produce more than consumed
             let flux = (rate * dt).min(self.internal[sub_idx]);
             self.internal[sub_idx] -= flux;
-            self.internal[prod_idx] = (self.internal[prod_idx] + flux).min(C_MAX);
+            self.internal[prod_idx] = (self.internal[prod_idx] + flux).min(sim.c_max);
         }
 
-        // Maintenance energy drain: each tick, the cell loses LAMBDA_MAINTENANCE
+        // Maintenance energy drain: each tick, the cell loses lambda_maintenance
         // fraction of its current energy. During division prep, this cost is
         // multiplied — the cell is duplicating its genome, ribosomes, membranes.
         // Cells that evolve shorter prep times pay even more (rush penalty).
         let prep_multiplier = if self.prep_remaining > 0 {
             // Rush penalty: faster prep = more expensive per tick
             let evolved_prep = self.ruleset.fate.division_prep_ticks.max(1.0);
-            let rush = (BASE_DIVISION_PREP - evolved_prep).max(0.0);
-            PREP_MAINTENANCE_MULTIPLIER + rush * RUSH_PENALTY_RATE
+            let rush = (sim.base_division_prep - evolved_prep).max(0.0);
+            sim.prep_maintenance_multiplier + rush * sim.rush_penalty_rate
         } else {
             1.0
         };
-        self.internal[0] *= 1.0 - LAMBDA_MAINTENANCE * prep_multiplier * dt;
+        self.internal[0] *= 1.0 - sim.lambda_maintenance * prep_multiplier * dt;
 
         // Protein expression cost: each active enzyme requires transcription,
         // translation, and folding resources. No-op reactions (substrate == product)
         // are skipped — they don't encode a real enzyme.
         let active_rxn_count = self.ruleset.reactions.iter()
-            .filter(|r| r.v_max.abs() > 1e-9 && r.substrate != r.product)
+            .filter(|r| r.v_max.abs() > sim.active_reaction_threshold && r.substrate != r.product)
             .count();
         self.internal[0] = (self.internal[0]
-            - active_rxn_count as f32 * REACTION_MAINTENANCE * dt)
+            - active_rxn_count as f32 * sim.reaction_maintenance * dt)
             .max(0.0);
 
         // === PHASE 4: EFFECTOR PASS ===
@@ -316,7 +317,7 @@ impl CellState {
         self.age += 1;
 
         // Death check first — hard floor is non-evolvable physics.
-        let effective_death = self.ruleset.fate.death_energy.max(HARD_DEATH_FLOOR);
+        let effective_death = self.ruleset.fate.death_energy.max(sim.hard_death_floor);
 
         let event = if energy < effective_death {
             // Dead — including cells that ran out of energy during prep.
@@ -386,9 +387,9 @@ impl Ruleset {
     /// Structural mutations (rewiring reaction substrate/product/catalyst)
     /// happen 10x less frequently — they're more disruptive and usually lethal,
     /// but occasionally create entirely new metabolic capabilities.
-    pub fn mutate(&mut self, rng: &mut impl Rng) {
+    pub fn mutate(&mut self, rng: &mut impl Rng, sim: &SimulationConfig) {
         let rate = self.mutation_rate;
-        let normal = Normal::new(0.0f32, 0.1).unwrap();
+        let normal = Normal::new(0.0f32, sim.mutation_stddev).unwrap();
 
         // Helper: with probability `rate`, add a small Gaussian perturbation.
         fn maybe_mutate(val: &mut f32, rate: f32, normal: &Normal<f32>, rng: &mut impl Rng) {
@@ -402,7 +403,7 @@ impl Ruleset {
         for r in &mut self.receptors {
             maybe_mutate(&mut r.k_half, rate, &normal, rng);
             maybe_mutate(&mut r.n_hill, rate, &normal, rng);
-            r.n_hill = r.n_hill.clamp(0.5, 8.0); // prevent degenerate Hill exponents
+            r.n_hill = r.n_hill.clamp(sim.hill_exponent_clamp_low, sim.hill_exponent_clamp_high);
             maybe_mutate(&mut r.gain, rate, &normal, rng);
         }
 
@@ -410,10 +411,10 @@ impl Ruleset {
         for t in &mut self.transport {
             maybe_mutate(&mut t.uptake_rate, rate, &normal, rng);
             maybe_mutate(&mut t.secrete_rate, rate, &normal, rng);
-            if rng.random::<f32>() < rate * 0.1 {
+            if rng.random::<f32>() < rate * sim.structural_mutation_rate_mult {
                 t.ext_species = rng.random_range(0..S_EXT as u8);
             }
-            if rng.random::<f32>() < rate * 0.1 {
+            if rng.random::<f32>() < rate * sim.structural_mutation_rate_mult {
                 t.int_species = rng.random_range(0..M_INT as u8);
             }
         }
@@ -429,7 +430,7 @@ impl Ruleset {
         // First, collect indices of active reactions for duplication source.
         let active_indices: Vec<usize> = self.reactions.iter()
             .enumerate()
-            .filter(|(_, r)| r.v_max.abs() > 1e-9)
+            .filter(|(_, r)| r.v_max.abs() > sim.active_reaction_threshold)
             .map(|(i, _)| i)
             .collect();
 
@@ -441,7 +442,7 @@ impl Ruleset {
             // Structural mutation: copy topology from an existing active reaction
             // (gene duplication + divergence). Falls back to random if no active
             // reactions exist (shouldn't happen in practice).
-            if rng.random::<f32>() < rate * 0.1 {
+            if rng.random::<f32>() < rate * sim.structural_mutation_rate_mult {
                 if let Some(&donor) = active_indices.get(
                     rng.random_range(0..active_indices.len().max(1))
                 ) {
@@ -452,7 +453,7 @@ impl Ruleset {
                     self.reactions[i].substrate = rng.random_range(0..M_INT as u8);
                 }
             }
-            if rng.random::<f32>() < rate * 0.1 {
+            if rng.random::<f32>() < rate * sim.structural_mutation_rate_mult {
                 if let Some(&donor) = active_indices.get(
                     rng.random_range(0..active_indices.len().max(1))
                 ) {
@@ -463,7 +464,7 @@ impl Ruleset {
                     self.reactions[i].product = rng.random_range(0..M_INT as u8);
                 }
             }
-            if rng.random::<f32>() < rate * 0.1 {
+            if rng.random::<f32>() < rate * sim.structural_mutation_rate_mult {
                 if let Some(&donor) = active_indices.get(
                     rng.random_range(0..active_indices.len().max(1))
                 ) {
@@ -491,11 +492,14 @@ impl Ruleset {
         maybe_mutate(&mut self.hgt_propensity, rate, &normal, rng);
 
         // Meta-evolution: the mutation rate itself can mutate.
-        // This happens at a fixed 1% rate (not gated by the current mutation_rate)
+        // This happens at a fixed rate (not gated by the current mutation_rate)
         // to prevent runaway suppression of evolvability.
-        if rng.random::<f32>() < 0.01 {
-            self.mutation_rate += normal.sample(rng) * 0.01;
-            self.mutation_rate = self.mutation_rate.clamp(0.001, 0.5);
+        if rng.random::<f32>() < sim.meta_mutation_rate {
+            self.mutation_rate += normal.sample(rng) * sim.meta_mutation_rate;
+            self.mutation_rate = self.mutation_rate.clamp(
+                sim.meta_mutation_clamp_low,
+                sim.meta_mutation_clamp_high,
+            );
         }
     }
 }

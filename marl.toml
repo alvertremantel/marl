@@ -1,0 +1,74 @@
+# Sample MARL runtime configuration.
+# Copy this file and pass `--config myrun.toml` to use your own settings.
+# All values shown here are the built-in defaults.
+
+[simulation]
+dx = 0.0001                     # 100 um voxel size
+dt = 1.0                        # 1 tick = 1 day
+diffusion_substeps = 10
+
+# Diffusion coefficients per external species (voxels^2/tick)
+d_voxel = [0.0, 1.5, 1.0, 1.2, 0.8, 0.5, 0.5, 0.1, 0.3, 0.3, 0.3, 0.3]
+
+# Decay rates per species (fraction per tick)
+lambda_decay = [0.0, 0.01, 0.01, 0.005, 0.03, 0.05, 0.05, 0.002, 0.01, 0.01, 0.01, 0.01]
+
+source_rate_oxidant = 0.4
+source_rate_carbon = 0.15
+source_rate_reductant = 0.5
+
+epsilon = 0.001
+c_max = 10.0
+lambda_maintenance = 0.12
+hard_death_floor = 0.01
+reaction_maintenance = 0.003
+
+base_division_prep = 20.0
+prep_maintenance_multiplier = 2.0
+rush_penalty_rate = 0.05
+
+alpha_eps = 0.8
+k_eps = 2.0
+
+light_efficiency = 0.0
+surface_intensity = 1.0
+cell_absorption = 0.3
+chemical_absorption = 0.05
+light_floor = 0.0000001
+
+mutation_stddev = 0.1
+structural_mutation_rate_mult = 0.1
+meta_mutation_rate = 0.01
+meta_mutation_clamp_low = 0.001
+meta_mutation_clamp_high = 0.5
+hill_exponent_clamp_low = 0.5
+hill_exponent_clamp_high = 8.0
+active_reaction_threshold = 0.000000001
+
+seed_margin = 5
+phototroph_z_lo = 0.0
+phototroph_z_hi = 3.0
+chemolithotroph_z_lo = 80.0
+chemolithotroph_z_hi = 130.0
+anaerobe_z_lo = 120.0
+anaerobe_z_hi = 180.0
+
+division_neighbor_distance = 2
+
+boundary_prime_layers = 2
+boundary_prime_oxidant = 0.5
+boundary_prime_carbon = 0.3
+boundary_prime_reductant = 0.5
+
+[output]
+max_ticks = 5000
+stats_interval = 100
+snapshot_interval = 500
+image_interval = 500
+seed_count = 30
+output_dir = "output/run_128x128x64"
+
+xz_snapshot_species = [1, 2, 3, 4]
+xy_slice_depths_frac = [0.0, 0.25, 0.5, 0.75]
+write_ancestry_map = true
+write_density_map = true

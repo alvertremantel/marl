@@ -450,6 +450,7 @@ impl DataLogger {
         light: &LightField,
         total_divisions: u64,
         total_deaths: u64,
+        sim: &SimulationConfig,
     ) -> Result<()> {
         let path = self.output_dir.join("summary.md");
         let file = File::create(&path)?;
@@ -484,11 +485,11 @@ impl DataLogger {
         writeln!(w, "- Grid: {}x{}x{} ({} voxels)", GRID_X, GRID_Y, GRID_Z, voxel_count)?;
         writeln!(w, "- Ticks: {}", total_ticks)?;
         writeln!(w, "- Runtime: {:.1}s ({:.2} ticks/sec)", runtime_secs, ticks_per_sec)?;
-        writeln!(w, "- Maintenance rate: {}", LAMBDA_MAINTENANCE)?;
+        writeln!(w, "- Maintenance rate: {}", sim.lambda_maintenance)?;
         writeln!(
             w,
             "- Boundary sources: oxidant={}, carbon={}, reductant={}",
-            SOURCE_RATE_OXIDANT, SOURCE_RATE_CARBON, SOURCE_RATE_REDUCTANT
+            sim.source_rate_oxidant, sim.source_rate_carbon, sim.source_rate_reductant
         )?;
         writeln!(w)?;
 

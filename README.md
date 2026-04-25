@@ -35,7 +35,7 @@ This repository is a functional prototype, not a polished platform. The core sim
 
 ## Architecture At A Glance
 
-- `src/config.rs`: compile-time physics constants and runtime CLI config
+- `src/config.rs`: compile-time grid constants and runtime config structs (TOML + CLI)
 - `src/field.rs`: 3D extracellular chemistry and parallel diffusion
 - `src/cell.rs`: cell rulesets, cell tick, mutation logic, lineage state
 - `src/light.rs`: top-down light attenuation field
@@ -61,7 +61,7 @@ More detail lives in `INFO.md`.
 - `hgt.rs` is implemented, but HGT is currently disabled in the main loop.
 - The code includes spare external and internal species capacity for future chemistry.
 - The project is CPU-only today despite earlier GPU-oriented ambitions.
-- The `half` dependency is present in `Cargo.toml` but is not used by the current source.
+
 
 ## Running
 
@@ -71,14 +71,27 @@ Build and run with Cargo:
 cargo run --release -- --ticks 5000 --stats 100 --snapshot 500 --images 500
 ```
 
-Supported runtime flags:
+### Runtime Configuration
 
-- `--ticks <n>`
-- `--stats <n>`
-- `--snapshot <n>`
-- `--images <n>`
-- `--seed <n>`
-- `--output <dir>`
+All physics, chemistry, biology, and output parameters are runtime-configurable via an optional TOML file and CLI overrides. Grid dimensions remain compile-time constants (they determine array sizes).
+
+Load settings from a TOML file:
+
+```bash
+cargo run --release -- --config marl.toml
+```
+
+A sample `marl.toml` with all defaults is included in the repository. Copy it and modify values for parameter sweeps or reproducible scenarios. Partial TOML files work — missing keys fall back to built-in defaults.
+
+Supported CLI flags (override TOML values):
+
+- `--config <path>` — path to TOML config file (default: `marl.toml` in CWD)
+- `--ticks <n>` — total simulation ticks
+- `--stats <n>` — stdout stats interval
+- `--snapshot <n>` — CSV snapshot interval
+- `--images <n>` — PPM image snapshot interval
+- `--seed <n>` — cells to seed per starter metabolism
+- `--output <dir>` — output directory
 
 Grid dimensions are compile-time constants in `src/config.rs`, so changing grid size requires recompilation.
 

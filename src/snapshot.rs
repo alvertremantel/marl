@@ -273,20 +273,22 @@ pub fn write_cell_density_xz(
 /// Write a full set of diagnostic images for the current simulation state.
 ///
 /// This produces:
-///   - XZ cross-sections (vertical slices at y=GRID_Y/2) for the four main
-///     chemical species: oxidant (1), reductant (2), carbon (3), organic (4).
+///   - XZ cross-sections (vertical slices at y=GRID_Y/2) for the configured
+///     species (default: oxidant (1), reductant (2), carbon (3), organic (4)).
 ///     These show the vertical gradient structure that emerges from
 ///     top-sourced oxidant/carbon vs. bottom-sourced reductant.
 ///
-///   - XY cross-sections (horizontal slices) for carbon (species 3) at four
-///     depths: z=0 (surface), z=GRID_Z/4, z=GRID_Z/2, z=3*GRID_Z/4.
+///   - XY cross-sections (horizontal slices) for carbon (species 3) at the
+///     configured depth fractions.
 ///     These reveal lateral heterogeneity and niche partitioning at each
 ///     depth layer.
 ///
 ///   - Cell density XZ heatmap showing where cells are physically located
-///     in the vertical column.
+///     in the vertical column (if enabled).
 ///
-/// All files are written to `out_dir`, which is created if it does not exist.
+///   - Ancestry map showing starter-type origin of cells (if enabled).
+///
+/// All files are written to `out.output_dir`, which is created if it does not exist.
 /// Filenames include the tick number for easy time-series assembly.
 pub fn write_all_snapshots(
     field: &Field,
@@ -294,37 +296,35 @@ pub fn write_all_snapshots(
     cells: &HashMap<[u16; 3], usize>,
     cell_vec: &[crate::cell::CellState],
     tick: u64,
-    out_dir: &str,
+    out: &OutputConfig,
+    _sim: &SimulationConfig,
 ) -> std::io::Result<()> {
+    let out_dir = &out.output_dir;
     // Ensure the output directory exists.
     fs::create_dir_all(out_dir)?;
 
     // --- XZ cross-sections for key chemical species ---
-    // These are the four species that form the core Winogradsky-column
-    // chemistry: oxidant and carbon enter from above, reductant from below,
-    // and organic waste is produced by cellular metabolism.
-    for &species in &[1_usize, 2, 3, 4] {
-        write_xz_cross_section(field, species, tick, out_dir)?;
+    for &species in &out.xz_snapshot_species {
+        if species < S_EXT {
+            write_xz_cross_section(field, species, tick, out_dir)?;
+        }
     }
 
-    // --- XY cross-sections at four representative depths ---
-    // Species 3 (carbon) is a good default because it shows both the
-    // boundary source at z=0 and depletion by cells at depth.
-    let z_depths = [
-        0,
-        GRID_Z / 4,
-        GRID_Z / 2,
-        3 * GRID_Z / 4,
-    ];
-    for &z in &z_depths {
+    // --- XY cross-sections at configured depths ---
+    for &frac in &out.xy_slice_depths_frac {
+        let z = (frac.clamp(0.0, 1.0) * (GRID_Z - 1) as f32).round() as usize;
         write_xy_cross_section(field, 3, z, tick, out_dir)?;
     }
 
     // --- Cell density heatmap ---
-    write_cell_density_xz(cells, tick, out_dir)?;
+    if out.write_density_map {
+        write_cell_density_xz(cells, tick, out_dir)?;
+    }
 
     // --- Ancestry map (red=photo, green=chemo, blue=anaerobe) ---
-    write_ancestry_xz(cell_vec, cells, tick, out_dir)?;
+    if out.write_ancestry_map {
+        write_ancestry_xz(cell_vec, cells, tick, out_dir)?;
+    }
 
     Ok(())
 }

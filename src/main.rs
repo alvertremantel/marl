@@ -10,21 +10,21 @@ use rand::Rng;
 use std::time::Instant;
 
 fn main() {
-    // Parse runtime config from CLI args (tick count, output intervals, etc.)
+    // Parse runtime config from CLI args and optional TOML file.
     // Grid dimensions are compile-time — change in config.rs and recompile.
-    let cfg = RunConfig::from_args();
+    let cfg = Config::load();
     let mut rng = rand::rng();
 
     let mut field = Field::new();
     let mut light = LightField::new();
 
     // Create the data logger — opens ticks.csv and manages all file output.
-    let mut logger = DataLogger::new(&cfg.output_dir)
+    let mut logger = DataLogger::new(&cfg.output.output_dir)
         .expect("Failed to create data logger / output directory");
 
     // Start with empty field — let boundary sources build gradients organically.
     // Pre-load only a thin boundary layer so initial cells can bootstrap.
-    init_field_boundaries(&mut field);
+    init_field_boundaries(&mut field, &cfg.simulation);
 
     // Cell storage: Vec for contiguous iteration + HashMap for O(1) spatial lookup.
     // The map stores position -> index into the Vec.
@@ -35,22 +35,25 @@ fn main() {
     // z_scale maps the "canonical" 200-layer depth to our actual grid depth,
     // so metabolisms land at the right relative positions regardless of GRID_Z.
     let z_scale = GRID_Z as f32 / 200.0;
+    let sim = &cfg.simulation;
 
-    // Phototrophs: surface (z=0..3) — need light for photosynthesis
-    seed_cells(&mut cells, &mut cell_map, &mut rng, cfg.seed_count,
-        0, 3, make_phototroph);
+    // Phototrophs: surface
+    let photo_lo = (sim.phototroph_z_lo * z_scale) as u16;
+    let photo_hi = (sim.phototroph_z_hi * z_scale).max(photo_lo as f32 + 1.0) as u16;
+    seed_cells(&mut cells, &mut cell_map, &mut rng, cfg.output.seed_count,
+        photo_lo, photo_hi, make_phototroph, sim);
 
     // Chemolithotrophs: chemocline — oxidize reductant using oxidant at the interface
-    let chemo_lo = (80.0 * z_scale) as u16;
-    let chemo_hi = (130.0 * z_scale).max(chemo_lo as f32 + 3.0) as u16;
-    seed_cells(&mut cells, &mut cell_map, &mut rng, cfg.seed_count,
-        chemo_lo, chemo_hi, make_chemolithotroph);
+    let chemo_lo = (sim.chemolithotroph_z_lo * z_scale) as u16;
+    let chemo_hi = (sim.chemolithotroph_z_hi * z_scale).max(chemo_lo as f32 + 3.0) as u16;
+    seed_cells(&mut cells, &mut cell_map, &mut rng, cfg.output.seed_count,
+        chemo_lo, chemo_hi, make_chemolithotroph, sim);
 
     // Anaerobes: deep zone — use reductant, killed by oxidant
-    let ana_lo = (120.0 * z_scale) as u16;
-    let ana_hi = (180.0 * z_scale).max(ana_lo as f32 + 3.0) as u16;
-    seed_cells(&mut cells, &mut cell_map, &mut rng, cfg.seed_count,
-        ana_lo, ana_hi, make_anaerobe);
+    let ana_lo = (sim.anaerobe_z_lo * z_scale) as u16;
+    let ana_hi = (sim.anaerobe_z_hi * z_scale).max(ana_lo as f32 + 3.0) as u16;
+    seed_cells(&mut cells, &mut cell_map, &mut rng, cfg.output.seed_count,
+        ana_lo, ana_hi, make_anaerobe, sim);
 
     println!("MARL v0.3 — CPU Prototype (Winogradsky)");
     println!("Grid: {}x{}x{} ({:.1}M voxels), Species: {} ext / {} int",
@@ -58,9 +61,9 @@ fn main() {
         (GRID_X * GRID_Y * GRID_Z) as f64 / 1e6,
         S_EXT, M_INT);
     println!("Seeded {} cells (photo/chemo/anaerobe)", cells.len());
-    println!("Output: {}", cfg.output_dir);
+    println!("Output: {}", cfg.output.output_dir);
     println!("Plan: {} ticks, stats every {}, snapshots every {}, images every {}",
-        cfg.max_ticks, cfg.stats_interval, cfg.snapshot_interval, cfg.image_interval);
+        cfg.output.max_ticks, cfg.output.stats_interval, cfg.output.snapshot_interval, cfg.output.image_interval);
     println!("---");
 
     let mut total_divisions: u64 = 0;
@@ -71,21 +74,20 @@ fn main() {
     let mut tick_divisions: u64;
     let mut tick_deaths: u64;
 
-    for tick in 0..cfg.max_ticks {
+    for tick in 0..cfg.output.max_ticks {
         tick_divisions = 0;
         tick_deaths = 0;
 
         // === STEP 1: Boundary sources ===
         // Inject oxidant + carbon at top, reductant at bottom — the only
         // external energy inputs. Everything else is recycled by cells.
-        field.apply_boundary_sources();
+        field.apply_boundary_sources(sim);
 
         // === STEP 2: Diffusion ===
         // Sub-stepped forward Euler on 3D Laplacian. CFL-stable because
         // D * dt_sub < 1/6 for all species (see config.rs).
         // Build occupancy grid so the diffusion solver knows where cells are.
-        // Occupied voxels impede chemical transport (CELL_DIFFUSION_FACTOR),
-        // creating nutrient shadows and density-dependent starvation.
+        // Occupied voxels are fully excluded from diffusion.
         let mut occupancy = vec![false; GRID_X * GRID_Y * GRID_Z];
         for pos in cell_map.keys() {
             let idx = pos[2] as usize * GRID_Y * GRID_X
@@ -93,13 +95,13 @@ fn main() {
                     + pos[0] as usize;
             occupancy[idx] = true;
         }
-        field.diffuse_tick_with_cells(&occupancy);
+        field.diffuse_tick_with_cells(&occupancy, sim);
 
         // === STEP 3: Light attenuation ===
         // Beer-Lambert top-down sweep. Light enters at z=0, attenuated by
         // cells and chemical absorbers. Stored per-voxel so photosynthesis
         // reactions can reference it as a catalyst.
-        light.update(&field, &cell_map);
+        light.update(&field, &cell_map, sim);
 
         // === STEP 4: Cell update pass ===
         // Each cell runs the 5-phase tick (receptor, transport, reactions,
@@ -113,7 +115,7 @@ fn main() {
             let ext = read_neighbor_environment(p, &field, &cell_map);
             let l = light.get(p[0] as usize, p[1] as usize, p[2] as usize);
 
-            let (deltas, event) = cell.tick(&ext, l);
+            let (deltas, event) = cell.tick(&ext, l, sim);
             // Secretion/consumption distributed to neighboring empty voxels
             apply_deltas_to_neighbors(p, &mut field, &cell_map, &deltas);
             events.push((i, event));
@@ -127,7 +129,7 @@ fn main() {
             match event {
                 CellEvent::Division => {
                     let parent = &cells[*i];
-                    if let Some(daughter_pos) = find_empty_neighbor(parent.pos, &cell_map, &mut rng) {
+                    if let Some(daughter_pos) = find_empty_neighbor(parent.pos, &cell_map, &mut rng, sim) {
                         let mut daughter = parent.clone();
                         daughter.pos = daughter_pos;
                         daughter.age = 0;
@@ -139,7 +141,7 @@ fn main() {
                             daughter.internal[k] *= 0.5;
                             cells[*i].internal[k] *= 0.5;
                         }
-                        daughter.ruleset.mutate(&mut rng);
+                        daughter.ruleset.mutate(&mut rng, sim);
                         births.push(daughter);
                         tick_divisions += 1;
                     }
@@ -185,12 +187,12 @@ fn main() {
         }
 
         // Print human-readable stats to stdout at configured interval
-        if tick % cfg.stats_interval == 0 || tick == cfg.max_ticks - 1 {
+        if tick % cfg.output.stats_interval == 0 || tick == cfg.output.max_ticks - 1 {
             print_stats(tick, &cells, &field, &light, total_divisions, total_deaths, &start);
         }
 
         // Write detailed CSV snapshots (chemistry profiles + cell dumps + reactions)
-        if tick % cfg.snapshot_interval == 0 || tick == cfg.max_ticks - 1 {
+        if tick % cfg.output.snapshot_interval == 0 || tick == cfg.output.max_ticks - 1 {
             let t = tick as u64;
             if let Err(e) = logger.snapshot_chemistry(t, &field, &light) {
                 eprintln!("Warning: failed to write chemistry snapshot at tick {}: {}", tick, e);
@@ -204,9 +206,9 @@ fn main() {
         }
 
         // Write PPM image snapshots (cross-sections, density maps)
-        if tick % cfg.image_interval == 0 || tick == cfg.max_ticks - 1 {
+        if tick % cfg.output.image_interval == 0 || tick == cfg.output.max_ticks - 1 {
             if let Err(e) = snapshot::write_all_snapshots(
-                &field, &light, &cell_map, &cells, tick as u64, &cfg.output_dir,
+                &field, &light, &cell_map, &cells, tick as u64, &cfg.output, sim,
             ) {
                 eprintln!("Warning: failed to write image snapshots at tick {}: {}", tick, e);
             }
@@ -218,16 +220,16 @@ fn main() {
 
     let runtime = start.elapsed().as_secs_f32();
     println!("\nDone. {} ticks in {:.1}s, final pop={}, div={}, death={}",
-        cfg.max_ticks, runtime, cells.len(), total_divisions, total_deaths);
+        cfg.output.max_ticks, runtime, cells.len(), total_divisions, total_deaths);
 
     // Write the post-run summary (lab notebook entry for this run)
     if let Err(e) = logger.write_summary(
-        cfg.max_ticks, runtime, &cells, &field, &light,
-        total_divisions, total_deaths,
+        cfg.output.max_ticks, runtime, &cells, &field, &light,
+        total_divisions, total_deaths, sim,
     ) {
         eprintln!("Warning: failed to write summary: {}", e);
     } else {
-        println!("Summary written to {}/summary.md", cfg.output_dir);
+        println!("Summary written to {}/summary.md", cfg.output.output_dir);
     }
 
     // Write the reaction registry — maps IDs back to topologies for the CLI tool
@@ -238,8 +240,10 @@ fn main() {
     }
 
     // Write ancestry-colored XZ cross-section (red=photo, green=chemo, blue=anaerobe)
-    if let Err(e) = snapshot::write_ancestry_xz(&cells, &cell_map, cfg.max_ticks as u64, &cfg.output_dir) {
-        eprintln!("Warning: failed to write ancestry map: {}", e);
+    if cfg.output.write_ancestry_map {
+        if let Err(e) = snapshot::write_ancestry_xz(&cells, &cell_map, cfg.output.max_ticks as u64, &cfg.output.output_dir) {
+            eprintln!("Warning: failed to write ancestry map: {}", e);
+        }
     }
 }
 
@@ -247,19 +251,20 @@ fn main() {
 
 /// Initialize field with thin boundary layers only.
 /// The bulk of the field starts empty — gradients build from boundary sources + diffusion.
-fn init_field_boundaries(field: &mut Field) {
-    // Prime only the boundary faces (2-3 layers deep) so initial cells
+fn init_field_boundaries(field: &mut Field, sim: &SimulationConfig) {
+    // Prime only the boundary faces (configurable layers deep) so initial cells
     // have a local substrate source but the bulk field is empty.
+    let layers = sim.boundary_prime_layers;
     for y in 0..GRID_Y {
         for x in 0..GRID_X {
-            // Top 2 layers: some oxidant and carbon (atmosphere analog)
-            for z in 0..2 {
-                field.set(x, y, z, 1, 0.5); // oxidant
-                field.set(x, y, z, 3, 0.3); // carbon
+            // Top layers: some oxidant and carbon (atmosphere analog)
+            for z in 0..layers {
+                field.set(x, y, z, 1, sim.boundary_prime_oxidant); // oxidant
+                field.set(x, y, z, 3, sim.boundary_prime_carbon); // carbon
             }
-            // Bottom 2 layers: some reductant (geological source analog)
-            for z in (GRID_Z - 2)..GRID_Z {
-                field.set(x, y, z, 2, 0.5); // reductant
+            // Bottom layers: some reductant (geological source analog)
+            for z in (GRID_Z - layers)..GRID_Z {
+                field.set(x, y, z, 2, sim.boundary_prime_reductant); // reductant
             }
         }
     }
@@ -275,12 +280,14 @@ fn seed_cells(
     z_lo: u16,
     z_hi: u16,
     factory: fn([u16; 3], u64) -> CellState,
+    sim: &SimulationConfig,
 ) {
+    let margin = sim.seed_margin;
     let mut seeded = 0;
     for _ in 0..count * 8 {
         if seeded >= count { break; }
-        let x = rng.random_range(5..GRID_X as u16 - 5);
-        let y = rng.random_range(5..GRID_Y as u16 - 5);
+        let x = rng.random_range(margin..GRID_X as u16 - margin);
+        let y = rng.random_range(margin..GRID_Y as u16 - margin);
         let z = rng.random_range(z_lo..z_hi.min(GRID_Z as u16));
         let pos = [x, y, z];
         if cell_map.contains_key(&pos) { continue; }
@@ -457,20 +464,22 @@ fn apply_deltas_to_neighbors(
     }
 }
 
-/// Find an empty voxel 2 steps away along a face axis (1 voxel gap).
+/// Find an empty voxel `division_neighbor_distance` steps away along a face axis.
 /// Daughters bud off and drift — they don't accrete like plant tissue.
-/// Falls back to adjacent placement if no 2-step positions are available.
+/// Falls back to adjacent placement if no long-range positions are available.
 fn find_empty_neighbor(
     pos: [u16; 3],
     occupied: &HashMap<[u16; 3], usize>,
     rng: &mut impl Rng,
+    sim: &SimulationConfig,
 ) -> Option<[u16; 3]> {
-    // Try distance-2 first (1 voxel gap between parent and daughter)
+    let dist = sim.division_neighbor_distance as i16;
+    // Try distance-first (gap between parent and daughter)
     let mut candidates: Vec<[u16; 3]> = Vec::new();
     for &(dx, dy, dz) in &FACE_OFFSETS {
-        let nx = pos[0] as i16 + dx * 2;
-        let ny = pos[1] as i16 + dy * 2;
-        let nz = pos[2] as i16 + dz * 2;
+        let nx = pos[0] as i16 + dx * dist;
+        let ny = pos[1] as i16 + dy * dist;
+        let nz = pos[2] as i16 + dz * dist;
         if nx >= 0 && nx < GRID_X as i16
             && ny >= 0 && ny < GRID_Y as i16
             && nz >= 0 && nz < GRID_Z as i16
@@ -486,7 +495,7 @@ fn find_empty_neighbor(
         return Some(candidates[idx]);
     }
 
-    // Fallback: adjacent placement if surrounded at distance 2
+    // Fallback: adjacent placement if surrounded at distance
     let adjacent = empty_neighbors(pos, occupied);
     if adjacent.is_empty() {
         None
