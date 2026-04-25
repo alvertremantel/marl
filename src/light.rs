@@ -50,7 +50,9 @@ impl LightField {
                     intensity *= (-sim.chemical_absorption * absorber).exp();
 
                     // Floor to prevent denormals
-                    if intensity < sim.light_floor { intensity = 0.0; }
+                    if intensity < sim.light_floor {
+                        intensity = 0.0;
+                    }
                 }
             }
         }

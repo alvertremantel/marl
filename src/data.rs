@@ -17,11 +17,11 @@
 
 use std::collections::HashMap;
 use std::fs::{self, File};
-use std::io::{BufWriter, Write, Result};
+use std::io::{BufWriter, Result, Write};
 use std::path::PathBuf;
 
-use crate::config::*;
 use crate::cell::*;
+use crate::config::*;
 use crate::field::Field;
 use crate::light::LightField;
 
@@ -104,8 +104,11 @@ impl ReactionRegistry {
         let mut entries: Vec<_> = self.map.iter().collect();
         entries.sort_by_key(|(_, id)| **id);
         for (topo, id) in entries {
-            writeln!(w, "{},{},{},{},{}", id, topo.substrate, topo.product,
-                     topo.catalyst, topo.cofactor)?;
+            writeln!(
+                w,
+                "{},{},{},{},{}",
+                id, topo.substrate, topo.product, topo.catalyst, topo.cofactor
+            )?;
         }
         w.flush()
     }
@@ -151,7 +154,10 @@ impl DataLogger {
         // The z-layer columns let you see vertical population stratification
         // over time — important for checking whether cells self-organize into
         // depth-dependent niches (the Winogradsky hypothesis).
-        write!(writer, "tick,population,avg_energy,avg_enzyme_a,avg_enzyme_b,avg_active_rxns,divisions_this_tick,deaths_this_tick")?;
+        write!(
+            writer,
+            "tick,population,avg_energy,avg_enzyme_a,avg_enzyme_b,avg_active_rxns,divisions_this_tick,deaths_this_tick"
+        )?;
         for z in 0..GRID_Z {
             write!(writer, ",z{}_cells", z)?;
         }
@@ -208,7 +214,10 @@ impl DataLogger {
             // Count active reactions: those with |v_max| above a tiny threshold.
             // This tells us how complex each cell's metabolism actually is,
             // as opposed to how many reaction slots are allocated.
-            let active = cell.ruleset.reactions.iter()
+            let active = cell
+                .ruleset
+                .reactions
+                .iter()
                 .filter(|r| r.v_max.abs() > 1e-9)
                 .count();
             sum_active_rxns += active as f64;
@@ -236,7 +245,14 @@ impl DataLogger {
         write!(
             self.ticks_writer,
             "{},{},{:.6},{:.6},{:.6},{:.4},{},{}",
-            tick, cells.len(), avg_e, avg_ea, avg_eb, avg_rxn, divisions, deaths
+            tick,
+            cells.len(),
+            avg_e,
+            avg_ea,
+            avg_eb,
+            avg_rxn,
+            divisions,
+            deaths
         )?;
 
         // Write per-z-layer cell counts.
@@ -264,12 +280,7 @@ impl DataLogger {
     /// - `tick` — current tick (used in the filename)
     /// - `field` — the chemical concentration field
     /// - `light` — the light attenuation field
-    pub fn snapshot_chemistry(
-        &self,
-        tick: u64,
-        field: &Field,
-        light: &LightField,
-    ) -> Result<()> {
+    pub fn snapshot_chemistry(&self, tick: u64, field: &Field, light: &LightField) -> Result<()> {
         let path = self.output_dir.join(format!("chem_{}.csv", tick));
         let file = File::create(&path)?;
         let mut w = BufWriter::new(file);
@@ -324,21 +335,23 @@ impl DataLogger {
     /// # Arguments
     /// - `tick` — current tick (used in the filename)
     /// - `cells` — slice of all living cells
-    pub fn snapshot_cells(
-        &self,
-        tick: u64,
-        cells: &[CellState],
-    ) -> Result<()> {
+    pub fn snapshot_cells(&self, tick: u64, cells: &[CellState]) -> Result<()> {
         let path = self.output_dir.join(format!("cells_{}.csv", tick));
         let file = File::create(&path)?;
         let mut w = BufWriter::new(file);
 
         // Header row.
-        writeln!(w, "x,y,z,energy,enzyme_a,enzyme_b,active_rxns,lineage_id,age,quiescent,starter_type")?;
+        writeln!(
+            w,
+            "x,y,z,energy,enzyme_a,enzyme_b,active_rxns,lineage_id,age,quiescent,starter_type"
+        )?;
 
         for cell in cells {
             // Count active reactions (same threshold as log_tick).
-            let active_rxns = cell.ruleset.reactions.iter()
+            let active_rxns = cell
+                .ruleset
+                .reactions
+                .iter()
                 .filter(|r| r.v_max.abs() > 1e-9)
                 .count();
 
@@ -348,14 +361,14 @@ impl DataLogger {
                 cell.pos[0],
                 cell.pos[1],
                 cell.pos[2],
-                cell.internal[0],   // energy
-                cell.internal[5],   // enzyme_a
-                cell.internal[6],   // enzyme_b
+                cell.internal[0], // energy
+                cell.internal[5], // enzyme_a
+                cell.internal[6], // enzyme_b
                 active_rxns,
                 cell.lineage_id,
                 cell.age,
                 cell.quiescent as u8,
-                cell.starter_type,  // 0=photo, 1=chemo, 2=anaerobe
+                cell.starter_type, // 0=photo, 1=chemo, 2=anaerobe
             )?;
         }
 
@@ -374,11 +387,7 @@ impl DataLogger {
     /// tuples. See `reaction_registry.csv` written at end of run.
     ///
     /// Inactive reactions (v_max ≈ 0) are omitted to keep file size manageable.
-    pub fn snapshot_reactions(
-        &mut self,
-        tick: u64,
-        cells: &[CellState],
-    ) -> Result<()> {
+    pub fn snapshot_reactions(&mut self, tick: u64, cells: &[CellState]) -> Result<()> {
         let path = self.output_dir.join(format!("reactions_{}.csv", tick));
         let file = File::create(&path)?;
         let mut w = BufWriter::new(file);
@@ -398,9 +407,14 @@ impl DataLogger {
 
             // Write as semicolon-separated IDs (commas are the CSV delimiter)
             let id_str: Vec<String> = ids.iter().map(|id| id.to_string()).collect();
-            writeln!(w, "{},{},{},{},{},{}",
-                cell.pos[0], cell.pos[1], cell.pos[2],
-                cell.starter_type, cell.lineage_id,
+            writeln!(
+                w,
+                "{},{},{},{},{},{}",
+                cell.pos[0],
+                cell.pos[1],
+                cell.pos[2],
+                cell.starter_type,
+                cell.lineage_id,
                 id_str.join(";"),
             )?;
         }
@@ -482,9 +496,17 @@ impl DataLogger {
         // ====================================================================
         writeln!(w, "## Parameters")?;
         writeln!(w)?;
-        writeln!(w, "- Grid: {}x{}x{} ({} voxels)", GRID_X, GRID_Y, GRID_Z, voxel_count)?;
+        writeln!(
+            w,
+            "- Grid: {}x{}x{} ({} voxels)",
+            GRID_X, GRID_Y, GRID_Z, voxel_count
+        )?;
         writeln!(w, "- Ticks: {}", total_ticks)?;
-        writeln!(w, "- Runtime: {:.1}s ({:.2} ticks/sec)", runtime_secs, ticks_per_sec)?;
+        writeln!(
+            w,
+            "- Runtime: {:.1}s ({:.2} ticks/sec)",
+            runtime_secs, ticks_per_sec
+        )?;
         writeln!(w, "- Maintenance rate: {}", sim.lambda_maintenance)?;
         writeln!(
             w,
@@ -546,7 +568,11 @@ impl DataLogger {
         let deep_count: u64 = z_counts[two_thirds..].iter().sum();
 
         writeln!(w, "- Surface zone (z < {}): {} cells", third, surface_count)?;
-        writeln!(w, "- Middle zone ({} <= z < {}): {} cells", third, two_thirds, middle_count)?;
+        writeln!(
+            w,
+            "- Middle zone ({} <= z < {}): {} cells",
+            third, two_thirds, middle_count
+        )?;
         writeln!(w, "- Deep zone (z >= {}): {} cells", two_thirds, deep_count)?;
 
         // Zonation ratio: max zone / min zone. A ratio >> 1 means cells
@@ -560,7 +586,11 @@ impl DataLogger {
         } else {
             1.0 // no cells at all, ratio is meaningless
         };
-        writeln!(w, "- Zonation ratio (max_zone / min_zone): {:.1}", zonation_ratio)?;
+        writeln!(
+            w,
+            "- Zonation ratio (max_zone / min_zone): {:.1}",
+            zonation_ratio
+        )?;
         writeln!(w)?;
 
         // ====================================================================
@@ -595,17 +625,37 @@ impl DataLogger {
         let waste_m = field.get(cx, cy, z_mid, 4);
         let waste_d = field.get(cx, cy, z_deep, 4);
 
-        writeln!(w, "- Oxidant: surface={:.3}, mid={:.3}, deep={:.3}", oxidant_s, oxidant_m, oxidant_d)?;
-        writeln!(w, "- Reductant: surface={:.3}, mid={:.3}, deep={:.3}", reductant_s, reductant_m, reductant_d)?;
-        writeln!(w, "- Carbon: surface={:.3}, mid={:.3}, deep={:.3}", carbon_s, carbon_m, carbon_d)?;
-        writeln!(w, "- Organic waste: surface={:.3}, mid={:.3}, deep={:.3}", waste_s, waste_m, waste_d)?;
+        writeln!(
+            w,
+            "- Oxidant: surface={:.3}, mid={:.3}, deep={:.3}",
+            oxidant_s, oxidant_m, oxidant_d
+        )?;
+        writeln!(
+            w,
+            "- Reductant: surface={:.3}, mid={:.3}, deep={:.3}",
+            reductant_s, reductant_m, reductant_d
+        )?;
+        writeln!(
+            w,
+            "- Carbon: surface={:.3}, mid={:.3}, deep={:.3}",
+            carbon_s, carbon_m, carbon_d
+        )?;
+        writeln!(
+            w,
+            "- Organic waste: surface={:.3}, mid={:.3}, deep={:.3}",
+            waste_s, waste_m, waste_d
+        )?;
 
         // Oxidant penetration depth: scan from surface downward, find first z
         // where oxidant drops below 0.01. If it never does, report GRID_Z.
         let oxidant_pen = (0..GRID_Z)
             .find(|&z| field.get(cx, cy, z, 1) < 0.01)
             .unwrap_or(GRID_Z);
-        writeln!(w, "- Oxidant penetration depth: z={} (first z where oxidant < 0.01)", oxidant_pen)?;
+        writeln!(
+            w,
+            "- Oxidant penetration depth: z={} (first z where oxidant < 0.01)",
+            oxidant_pen
+        )?;
 
         // Reductant penetration depth: scan from bottom upward, find first z
         // (from bottom) where reductant drops below 0.01. Reports depth
@@ -614,14 +664,22 @@ impl DataLogger {
             .rev()
             .find(|&z| field.get(cx, cy, z, 2) < 0.01)
             .unwrap_or(0);
-        writeln!(w, "- Reductant penetration depth: z={} (first z from bottom where reductant < 0.01)", reductant_pen)?;
+        writeln!(
+            w,
+            "- Reductant penetration depth: z={} (first z from bottom where reductant < 0.01)",
+            reductant_pen
+        )?;
 
         // Light intensity at the three sample depths — shows how quickly
         // light attenuates through the column (affected by cell density and EPS).
         let light_s = light.get(cx, cy, z_surface);
         let light_m = light.get(cx, cy, z_mid);
         let light_d = light.get(cx, cy, z_deep);
-        writeln!(w, "- Light: surface={:.3}, mid={:.3}, deep={:.3}", light_s, light_m, light_d)?;
+        writeln!(
+            w,
+            "- Light: surface={:.3}, mid={:.3}, deep={:.3}",
+            light_s, light_m, light_d
+        )?;
         writeln!(w)?;
 
         // ====================================================================
@@ -637,7 +695,10 @@ impl DataLogger {
             let mut sum_enzyme_b: f64 = 0.0;
 
             for cell in cells {
-                let active = cell.ruleset.reactions.iter()
+                let active = cell
+                    .ruleset
+                    .reactions
+                    .iter()
                     .filter(|r| r.v_max.abs() > 1e-9)
                     .count();
                 sum_active += active as f64;
@@ -649,8 +710,16 @@ impl DataLogger {
             let n = pop as f64;
             writeln!(w, "- Average active reactions: {:.1}", sum_active / n)?;
             writeln!(w, "- Average energy: {:.3}", sum_energy / n)?;
-            writeln!(w, "- Average enzyme_A (internal[5]): {:.4}", sum_enzyme_a / n)?;
-            writeln!(w, "- Average enzyme_B (internal[6]): {:.4}", sum_enzyme_b / n)?;
+            writeln!(
+                w,
+                "- Average enzyme_A (internal[5]): {:.4}",
+                sum_enzyme_a / n
+            )?;
+            writeln!(
+                w,
+                "- Average enzyme_B (internal[6]): {:.4}",
+                sum_enzyme_b / n
+            )?;
         } else {
             writeln!(w, "- (no living cells — all metrics are zero)")?;
         }
@@ -665,31 +734,69 @@ impl DataLogger {
         writeln!(w)?;
 
         if pop_pct > 80.0 {
-            writeln!(w, "- **Grid saturated** — consider larger grid or higher maintenance")?;
+            writeln!(
+                w,
+                "- **Grid saturated** — consider larger grid or higher maintenance"
+            )?;
         } else if pop_pct < 5.0 {
-            writeln!(w, "- **Population sparse** — dynamics may be resource-limited")?;
+            writeln!(
+                w,
+                "- **Population sparse** — dynamics may be resource-limited"
+            )?;
         } else {
-            writeln!(w, "- Population at {:.1}% capacity — within normal operating range", pop_pct)?;
+            writeln!(
+                w,
+                "- Population at {:.1}% capacity — within normal operating range",
+                pop_pct
+            )?;
         }
 
         if zonation_ratio > 2.0 {
-            writeln!(w, "- **Clear vertical zonation detected** (ratio {:.1}x)", zonation_ratio)?;
+            writeln!(
+                w,
+                "- **Clear vertical zonation detected** (ratio {:.1}x)",
+                zonation_ratio
+            )?;
         } else {
-            writeln!(w, "- Weak or no vertical zonation (ratio {:.1}x)", zonation_ratio)?;
+            writeln!(
+                w,
+                "- Weak or no vertical zonation (ratio {:.1}x)",
+                zonation_ratio
+            )?;
         }
 
         if (oxidant_pen as f64) < (GRID_Z as f64 / 2.0) {
-            writeln!(w, "- **Anoxic zone established** — oxidant penetrates to z={}", oxidant_pen)?;
+            writeln!(
+                w,
+                "- **Anoxic zone established** — oxidant penetrates to z={}",
+                oxidant_pen
+            )?;
         } else {
-            writeln!(w, "- No clear anoxic zone — oxidant penetrates to z={}", oxidant_pen)?;
+            writeln!(
+                w,
+                "- No clear anoxic zone — oxidant penetrates to z={}",
+                oxidant_pen
+            )?;
         }
 
         if turnover > 0.0 && turnover < 0.5 {
-            writeln!(w, "- Low turnover ({:.2}) — population is growing", turnover)?;
+            writeln!(
+                w,
+                "- Low turnover ({:.2}) — population is growing",
+                turnover
+            )?;
         } else if turnover > 1.5 {
-            writeln!(w, "- High turnover ({:.2}) — population is declining", turnover)?;
+            writeln!(
+                w,
+                "- High turnover ({:.2}) — population is declining",
+                turnover
+            )?;
         } else if total_divisions > 0 {
-            writeln!(w, "- Turnover near unity ({:.2}) — approximate steady state", turnover)?;
+            writeln!(
+                w,
+                "- Turnover near unity ({:.2}) — approximate steady state",
+                turnover
+            )?;
         }
 
         writeln!(w)?;

@@ -82,13 +82,13 @@ pub struct TransportParams {
 /// (and partially consumes) a second internal species.
 #[derive(Clone, Debug)]
 pub struct Reaction {
-    pub substrate: u8,   // consumed internal species
-    pub product: u8,     // produced internal species
-    pub catalyst: u8,    // enzyme/catalyst species
-    pub cofactor: u8,    // second required species, 0xFF = none
-    pub k_m: f32,        // Michaelis constant for substrate
-    pub v_max: f32,      // maximum reaction rate
-    pub k_cat: f32,      // half-saturation for catalyst
+    pub substrate: u8, // consumed internal species
+    pub product: u8,   // produced internal species
+    pub catalyst: u8,  // enzyme/catalyst species
+    pub cofactor: u8,  // second required species, 0xFF = none
+    pub k_m: f32,      // Michaelis constant for substrate
+    pub v_max: f32,    // maximum reaction rate
+    pub k_cat: f32,    // half-saturation for catalyst
 }
 
 /// Effector: conditional secretion of an internal species into the field.
@@ -210,7 +210,9 @@ impl CellState {
                 let c = ext_conc[i];
                 // Guard against negative/zero base in powf
                 let k = r.k_half.max(1e-6);
-                let n = r.n_hill.clamp(sim.hill_exponent_clamp_low, sim.hill_exponent_clamp_high);
+                let n = r
+                    .n_hill
+                    .clamp(sim.hill_exponent_clamp_low, sim.hill_exponent_clamp_high);
                 let kn = k.powf(n);
                 let cn = c.max(0.0).powf(n);
                 _activation[i] = r.gain * cn / (kn + cn + 1e-9);
@@ -222,13 +224,16 @@ impl CellState {
             let tp = &self.ruleset.transport[i];
             let ext_idx = tp.ext_species as usize;
             let int_idx = tp.int_species as usize;
-            if ext_idx >= S_EXT || int_idx >= M_INT { continue; }
+            if ext_idx >= S_EXT || int_idx >= M_INT {
+                continue;
+            }
 
             let uptake = tp.uptake_rate * ext_conc[ext_idx] / (1.0 + ext_conc[ext_idx]);
-            let secretion = tp.secrete_rate * self.internal[int_idx] / (1.0 + self.internal[int_idx]);
+            let secretion =
+                tp.secrete_rate * self.internal[int_idx] / (1.0 + self.internal[int_idx]);
 
-            self.internal[int_idx] = (self.internal[int_idx] + (uptake - secretion) * dt)
-                .clamp(0.0, sim.c_max);
+            self.internal[int_idx] =
+                (self.internal[int_idx] + (uptake - secretion) * dt).clamp(0.0, sim.c_max);
             field_deltas[ext_idx] += (secretion - uptake) * dt;
         }
 
@@ -239,13 +244,19 @@ impl CellState {
 
         // === PHASE 3: INTRACELLULAR REACTIONS ===
         for rxn in &self.ruleset.reactions {
-            if rxn.v_max.abs() < sim.active_reaction_threshold { continue; } // inactive slot
-            if rxn.substrate == rxn.product { continue; } // no-op (e.g. energy→energy)
+            if rxn.v_max.abs() < sim.active_reaction_threshold {
+                continue;
+            } // inactive slot
+            if rxn.substrate == rxn.product {
+                continue;
+            } // no-op (e.g. energy→energy)
 
             let sub_idx = rxn.substrate as usize;
             let prod_idx = rxn.product as usize;
             let cat_idx = rxn.catalyst as usize;
-            if sub_idx >= M_INT || prod_idx >= M_INT || cat_idx >= M_INT { continue; }
+            if sub_idx >= M_INT || prod_idx >= M_INT || cat_idx >= M_INT {
+                continue;
+            }
 
             let s = self.internal[sub_idx];
             let c = self.internal[cat_idx];
@@ -290,22 +301,27 @@ impl CellState {
         // Protein expression cost: each active enzyme requires transcription,
         // translation, and folding resources. No-op reactions (substrate == product)
         // are skipped — they don't encode a real enzyme.
-        let active_rxn_count = self.ruleset.reactions.iter()
+        let active_rxn_count = self
+            .ruleset
+            .reactions
+            .iter()
             .filter(|r| r.v_max.abs() > sim.active_reaction_threshold && r.substrate != r.product)
             .count();
-        self.internal[0] = (self.internal[0]
-            - active_rxn_count as f32 * sim.reaction_maintenance * dt)
-            .max(0.0);
+        self.internal[0] =
+            (self.internal[0] - active_rxn_count as f32 * sim.reaction_maintenance * dt).max(0.0);
 
         // === PHASE 4: EFFECTOR PASS ===
         if !self.quiescent {
             for eff in &self.ruleset.effectors {
                 let int_idx = eff.int_species as usize;
                 let ext_idx = eff.ext_species as usize;
-                if int_idx >= M_INT || ext_idx >= S_EXT { continue; }
+                if int_idx >= M_INT || ext_idx >= S_EXT {
+                    continue;
+                }
 
                 if self.internal[int_idx] > eff.threshold {
-                    let amount = eff.rate * self.internal[int_idx] / (1.0 + self.internal[int_idx]) * dt;
+                    let amount =
+                        eff.rate * self.internal[int_idx] / (1.0 + self.internal[int_idx]) * dt;
                     self.internal[int_idx] = (self.internal[int_idx] - amount).max(0.0);
                     field_deltas[ext_idx] += amount;
                 }
@@ -340,7 +356,7 @@ impl CellState {
             let prep = self.ruleset.fate.division_prep_ticks.max(1.0) as u16;
             self.prep_remaining = prep;
             self.quiescent = false;
-            CellEvent::None  // division happens when prep_remaining hits 0
+            CellEvent::None // division happens when prep_remaining hits 0
         } else if energy < self.ruleset.fate.quiescence_energy {
             self.quiescent = true;
             CellEvent::Quiescence
@@ -374,7 +390,7 @@ impl CellState {
 // microbial populations (mutator phenotypes).
 
 use rand::Rng;
-use rand_distr::{Normal, Distribution};
+use rand_distr::{Distribution, Normal};
 
 impl Ruleset {
     /// Apply random mutations to all evolvable parameters.
@@ -403,7 +419,9 @@ impl Ruleset {
         for r in &mut self.receptors {
             maybe_mutate(&mut r.k_half, rate, &normal, rng);
             maybe_mutate(&mut r.n_hill, rate, &normal, rng);
-            r.n_hill = r.n_hill.clamp(sim.hill_exponent_clamp_low, sim.hill_exponent_clamp_high);
+            r.n_hill = r
+                .n_hill
+                .clamp(sim.hill_exponent_clamp_low, sim.hill_exponent_clamp_high);
             maybe_mutate(&mut r.gain, rate, &normal, rng);
         }
 
@@ -428,7 +446,9 @@ impl Ruleset {
         // assembling random species indices from scratch.
         //
         // First, collect indices of active reactions for duplication source.
-        let active_indices: Vec<usize> = self.reactions.iter()
+        let active_indices: Vec<usize> = self
+            .reactions
+            .iter()
             .enumerate()
             .filter(|(_, r)| r.v_max.abs() > sim.active_reaction_threshold)
             .map(|(i, _)| i)
@@ -443,10 +463,11 @@ impl Ruleset {
             // (gene duplication + divergence). Falls back to random if no active
             // reactions exist (shouldn't happen in practice).
             if rng.random::<f32>() < rate * sim.structural_mutation_rate_mult {
-                if let Some(&donor) = active_indices.get(
-                    rng.random_range(0..active_indices.len().max(1))
-                ) {
-                    if donor != i { // don't copy from self
+                if let Some(&donor) =
+                    active_indices.get(rng.random_range(0..active_indices.len().max(1)))
+                {
+                    if donor != i {
+                        // don't copy from self
                         self.reactions[i].substrate = self.reactions[donor].substrate;
                     }
                 } else {
@@ -454,9 +475,9 @@ impl Ruleset {
                 }
             }
             if rng.random::<f32>() < rate * sim.structural_mutation_rate_mult {
-                if let Some(&donor) = active_indices.get(
-                    rng.random_range(0..active_indices.len().max(1))
-                ) {
+                if let Some(&donor) =
+                    active_indices.get(rng.random_range(0..active_indices.len().max(1)))
+                {
                     if donor != i {
                         self.reactions[i].product = self.reactions[donor].product;
                     }
@@ -465,9 +486,9 @@ impl Ruleset {
                 }
             }
             if rng.random::<f32>() < rate * sim.structural_mutation_rate_mult {
-                if let Some(&donor) = active_indices.get(
-                    rng.random_range(0..active_indices.len().max(1))
-                ) {
+                if let Some(&donor) =
+                    active_indices.get(rng.random_range(0..active_indices.len().max(1)))
+                {
                     if donor != i {
                         self.reactions[i].catalyst = self.reactions[donor].catalyst;
                     }
@@ -496,10 +517,9 @@ impl Ruleset {
         // to prevent runaway suppression of evolvability.
         if rng.random::<f32>() < sim.meta_mutation_rate {
             self.mutation_rate += normal.sample(rng) * sim.meta_mutation_rate;
-            self.mutation_rate = self.mutation_rate.clamp(
-                sim.meta_mutation_clamp_low,
-                sim.meta_mutation_clamp_high,
-            );
+            self.mutation_rate = self
+                .mutation_rate
+                .clamp(sim.meta_mutation_clamp_low, sim.meta_mutation_clamp_high);
         }
     }
 }
