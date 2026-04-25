@@ -11,6 +11,7 @@ use rayon::prelude::*;
 /// A pre-allocated scratch buffer (`scratch`) eliminates per-substep
 /// allocation during diffusion. The two buffers are swapped each substep
 /// so no copying is ever needed.
+#[derive(Clone)]
 pub struct Field {
     /// Concentration data: GRID_Z * GRID_Y * GRID_X * S_EXT floats
     pub data: Vec<f32>,
@@ -103,7 +104,12 @@ impl Field {
     /// The z-loop is embarrassingly parallel: each layer reads from the
     /// source buffer (immutable) and writes to its own slice of the
     /// scratch buffer. Rayon splits this across all available CPU cores.
-    fn diffusion_step_inner(&mut self, dt_sub: f32, occupancy: Option<&[bool]>, sim: &SimulationConfig) {
+    fn diffusion_step_inner(
+        &mut self,
+        dt_sub: f32,
+        occupancy: Option<&[bool]>,
+        sim: &SimulationConfig,
+    ) {
         let src = &self.data;
         let layer_size = GRID_Y * GRID_X * S_EXT;
         let voxel_layer_size = GRID_Y * GRID_X;
@@ -114,9 +120,8 @@ impl Field {
             .for_each(|(z, dst_layer)| {
                 for y in 0..GRID_Y {
                     for x in 0..GRID_X {
-                        let occ_here = occupancy.map_or(false, |o| {
-                            o[z * voxel_layer_size + y * GRID_X + x]
-                        });
+                        let occ_here =
+                            occupancy.map_or(false, |o| o[z * voxel_layer_size + y * GRID_X + x]);
 
                         // Occupied voxels are excluded from diffusion entirely.
                         // Their field concentrations are meaningless (chemicals
@@ -134,15 +139,14 @@ impl Field {
 
                         // Niche construction: EPS deposits slow diffusion locally
                         let structural = Self::get_from(src, x, y, z, 7);
-                        let niche_factor = 1.0 - sim.alpha_eps * structural / (sim.k_eps + structural);
+                        let niche_factor =
+                            1.0 - sim.alpha_eps * structural / (sim.k_eps + structural);
 
                         // Check which neighbors are occupied or walls.
                         // Occupied neighbors are treated identically to walls:
                         // Neumann BC (zero flux) by substituting center value.
                         let occ_check = |nx: usize, ny: usize, nz: usize| -> bool {
-                            occupancy.map_or(false, |o| {
-                                o[nz * voxel_layer_size + ny * GRID_X + nx]
-                            })
+                            occupancy.map_or(false, |o| o[nz * voxel_layer_size + ny * GRID_X + nx])
                         };
 
                         for s in 0..S_EXT {
@@ -151,18 +155,36 @@ impl Field {
 
                             // 6-neighbor Laplacian. Walls AND occupied neighbors
                             // both get Neumann treatment (use center value c).
-                            let xm = if x == 0 || occ_check(x - 1, y, z) { c }
-                                     else { Self::get_from(src, x - 1, y, z, s) };
-                            let xp = if x >= GRID_X - 1 || occ_check(x + 1, y, z) { c }
-                                     else { Self::get_from(src, x + 1, y, z, s) };
-                            let ym = if y == 0 || occ_check(x, y - 1, z) { c }
-                                     else { Self::get_from(src, x, y - 1, z, s) };
-                            let yp = if y >= GRID_Y - 1 || occ_check(x, y + 1, z) { c }
-                                     else { Self::get_from(src, x, y + 1, z, s) };
-                            let zm = if z == 0 || occ_check(x, y, z - 1) { c }
-                                     else { Self::get_from(src, x, y, z - 1, s) };
-                            let zp = if z >= GRID_Z - 1 || occ_check(x, y, z + 1) { c }
-                                     else { Self::get_from(src, x, y, z + 1, s) };
+                            let xm = if x == 0 || occ_check(x - 1, y, z) {
+                                c
+                            } else {
+                                Self::get_from(src, x - 1, y, z, s)
+                            };
+                            let xp = if x >= GRID_X - 1 || occ_check(x + 1, y, z) {
+                                c
+                            } else {
+                                Self::get_from(src, x + 1, y, z, s)
+                            };
+                            let ym = if y == 0 || occ_check(x, y - 1, z) {
+                                c
+                            } else {
+                                Self::get_from(src, x, y - 1, z, s)
+                            };
+                            let yp = if y >= GRID_Y - 1 || occ_check(x, y + 1, z) {
+                                c
+                            } else {
+                                Self::get_from(src, x, y + 1, z, s)
+                            };
+                            let zm = if z == 0 || occ_check(x, y, z - 1) {
+                                c
+                            } else {
+                                Self::get_from(src, x, y, z - 1, s)
+                            };
+                            let zp = if z >= GRID_Z - 1 || occ_check(x, y, z + 1) {
+                                c
+                            } else {
+                                Self::get_from(src, x, y, z + 1, s)
+                            };
 
                             let laplacian = xm + xp + ym + yp + zm + zp - 6.0 * c;
                             let decay = sim.lambda_decay[s] * c;
@@ -224,6 +246,68 @@ impl Field {
                 let re = self.get(x, y, z, 2);
                 self.set(x, y, z, 2, (re + sim.source_rate_reductant).min(sim.c_max));
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn init_deterministic_field(field: &mut Field) {
+        for z in 0..GRID_Z {
+            for y in 0..GRID_Y {
+                for x in 0..GRID_X {
+                    for s in 0..S_EXT {
+                        let value = ((x * 13 + y * 17 + z * 19 + s * 23) % 541) as f32 * 0.001;
+                        field.set(x, y, z, s, value);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn occupied_voxel_is_copied_unchanged() {
+        let mut sim = SimulationConfig::default();
+        sim.diffusion_substeps = 1;
+
+        let mut field = Field::new();
+        init_deterministic_field(&mut field);
+
+        let x = GRID_X / 2;
+        let y = GRID_Y / 2;
+        let z = GRID_Z / 2;
+        let before = field.read_voxel(x, y, z);
+
+        let mut occupancy = vec![false; GRID_X * GRID_Y * GRID_Z];
+        occupancy[z * GRID_Y * GRID_X + y * GRID_X + x] = true;
+
+        field.diffuse_tick_with_cells(&occupancy, &sim);
+
+        assert_eq!(field.read_voxel(x, y, z), before);
+    }
+
+    #[test]
+    fn deterministic_diffusion_stays_finite_and_nonnegative() {
+        let mut sim = SimulationConfig::default();
+        sim.diffusion_substeps = 1;
+
+        let mut field = Field::new();
+        init_deterministic_field(&mut field);
+        let occupancy = vec![false; GRID_X * GRID_Y * GRID_Z];
+
+        field.diffuse_tick_with_cells(&occupancy, &sim);
+
+        for (index, value) in field.data.iter().copied().enumerate() {
+            assert!(
+                value.is_finite(),
+                "non-finite concentration at index {index}"
+            );
+            assert!(
+                value >= 0.0,
+                "negative concentration at index {index}: {value}"
+            );
         }
     }
 }

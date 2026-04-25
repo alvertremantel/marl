@@ -97,12 +97,7 @@ pub fn value_to_color(val: f32, max_val: f32) -> [u8; 3] {
 ///
 /// `pixels` must contain exactly `width * height` entries, stored row-major
 /// (left-to-right, top-to-bottom).
-fn write_ppm(
-    path: &Path,
-    width: usize,
-    height: usize,
-    pixels: &[[u8; 3]],
-) -> std::io::Result<()> {
+fn write_ppm(path: &Path, width: usize, height: usize, pixels: &[[u8; 3]]) -> std::io::Result<()> {
     let file = fs::File::create(path)?;
     let mut w = BufWriter::new(file);
 
@@ -365,7 +360,7 @@ pub fn write_ancestry_xz(
                     0 => [brightness, brightness / 5, brightness / 5], // red = phototroph
                     1 => [brightness / 5, brightness, brightness / 5], // green = chemolithotroph
                     2 => [brightness / 5, brightness / 5, brightness], // blue = anaerobe
-                    _ => [brightness; 3],                               // white = unknown
+                    _ => [brightness; 3],                              // white = unknown
                 };
                 pixels[z * width + x] = color;
             }

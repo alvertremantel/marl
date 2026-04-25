@@ -32,3 +32,36 @@ All non-array-size simulation parameters have been moved from compile-time `cons
 - `R_MAX`, `S_RECEPTORS`, `S_TRANSPORTERS`, `S_EFFECTORS`
 
 These cannot be runtime-configurable because they size arrays and `Vec`s throughout the code.
+
+## Completed: GPU Reaction-Diffusion Prototype (2026-04-25)
+
+The first correctness-first GPU diffusion prototype is implemented behind the optional `gpu` Cargo feature.
+
+### What changed
+- `Cargo.toml` / `Cargo.lock`: added optional `gpu` feature with `wgpu`, `pollster`, and `bytemuck`
+- `src/gpu/`: added GPU context, synchronous `GpuFieldDiffuser`, and naive WGSL field diffusion shader
+- `src/main.rs`: added `--gpu-diffusion` behind `#[cfg(feature = "gpu")]`; CPU diffusion remains default
+- `src/field.rs`: added `Clone` and focused CPU diffusion tests
+- `tests/gpu_diffusion.rs`: added deterministic CPU/GPU equivalence tests for empty, center occupied, boundary-adjacent, dense cluster, one-substep, and default-substep cases
+
+### Verification
+- Baseline before edits: `cargo check`, `cargo test`, and `cargo run --release -- --ticks 10 --stats 5 --snapshot 1000 --images 1000`
+- `cargo check`: passes
+- `cargo test`: passes
+- `cargo check --features gpu`: passes
+- `cargo test --features gpu`: passes on NVIDIA GeForce RTX 4060 (Vulkan)
+- `cargo build --release`: passes
+- `cargo build --release --features gpu`: passes
+- CPU run: `cargo run --release -- --ticks 10 --stats 5 --snapshot 1000 --images 1000`
+- GPU run: `cargo run --release --features gpu -- --ticks 10 --stats 5 --snapshot 1000 --images 1000 --gpu-diffusion`
+
+### Observed short-run timing
+- CPU 10-tick release run: about 5.2s, about 1.9 ticks/s by final stats line
+- GPU 10-tick release run with full upload/readback each tick: about 1.2s, about 8.9 ticks/s by final stats line
+- These runs used normal random seeding, so timing is useful as a coarse sanity check only; deterministic correctness is covered by GPU tests.
+
+### Known limitations
+- GPU path only replaces field diffusion; boundary sources, light, cells, mutation, logging, and snapshots remain CPU-side
+- Field and occupancy are uploaded every tick and the full field is read back every tick
+- Shader constants are duplicated for `128x128x64` and `S_EXT=12`; runtime validation now fails GPU initialization if Rust constants drift
+- Params are passed as a read-only storage buffer, not a uniform buffer, to avoid WGSL uniform array stride constraints

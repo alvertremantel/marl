@@ -14,11 +14,11 @@ pub const GRID_Y: usize = 128;
 pub const GRID_Z: usize = 64;
 
 // Species counts
-pub const S_EXT: usize = 12;  // external chemical species
-pub const M_INT: usize = 16;  // internal chemical species
+pub const S_EXT: usize = 12; // external chemical species
+pub const M_INT: usize = 16; // internal chemical species
 
 // Reaction network
-pub const R_MAX: usize = 16;  // max reactions per cell
+pub const R_MAX: usize = 16; // max reactions per cell
 pub const S_RECEPTORS: usize = 8;
 pub const S_TRANSPORTERS: usize = 8;
 pub const S_EFFECTORS: usize = 8;
@@ -107,13 +107,9 @@ impl Default for SimulationConfig {
             dt: 1.0,
             diffusion_substeps: 10,
 
-            d_voxel: [
-                0.0, 1.5, 1.0, 1.2, 0.8, 0.5, 0.5, 0.1,
-                0.3, 0.3, 0.3, 0.3,
-            ],
+            d_voxel: [0.0, 1.5, 1.0, 1.2, 0.8, 0.5, 0.5, 0.1, 0.3, 0.3, 0.3, 0.3],
             lambda_decay: [
-                0.0, 0.01, 0.01, 0.005, 0.03, 0.05, 0.05, 0.002,
-                0.01, 0.01, 0.01, 0.01,
+                0.0, 0.01, 0.01, 0.005, 0.03, 0.05, 0.05, 0.002, 0.01, 0.01, 0.01, 0.01,
             ],
 
             source_rate_oxidant: 0.4,
@@ -247,30 +243,42 @@ impl Config {
             match args[i].as_str() {
                 "--config" => i += 2,
                 "--ticks" if i + 1 < args.len() => {
-                    if let Ok(v) = args[i + 1].parse() { cfg.output.max_ticks = v; }
+                    if let Ok(v) = args[i + 1].parse() {
+                        cfg.output.max_ticks = v;
+                    }
                     i += 2;
                 }
                 "--stats" if i + 1 < args.len() => {
-                    if let Ok(v) = args[i + 1].parse() { cfg.output.stats_interval = v; }
+                    if let Ok(v) = args[i + 1].parse() {
+                        cfg.output.stats_interval = v;
+                    }
                     i += 2;
                 }
                 "--snapshot" if i + 1 < args.len() => {
-                    if let Ok(v) = args[i + 1].parse() { cfg.output.snapshot_interval = v; }
+                    if let Ok(v) = args[i + 1].parse() {
+                        cfg.output.snapshot_interval = v;
+                    }
                     i += 2;
                 }
                 "--images" if i + 1 < args.len() => {
-                    if let Ok(v) = args[i + 1].parse() { cfg.output.image_interval = v; }
+                    if let Ok(v) = args[i + 1].parse() {
+                        cfg.output.image_interval = v;
+                    }
                     i += 2;
                 }
                 "--seed" if i + 1 < args.len() => {
-                    if let Ok(v) = args[i + 1].parse() { cfg.output.seed_count = v; }
+                    if let Ok(v) = args[i + 1].parse() {
+                        cfg.output.seed_count = v;
+                    }
                     i += 2;
                 }
                 "--output" if i + 1 < args.len() => {
                     cfg.output.output_dir = args[i + 1].clone();
                     i += 2;
                 }
-                _ => { i += 1; }
+                _ => {
+                    i += 1;
+                }
             }
         }
 

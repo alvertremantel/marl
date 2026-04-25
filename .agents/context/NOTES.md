@@ -27,3 +27,26 @@
 - Starter metabolism factory functions (`make_phototroph`, etc.) remain hardcoded. Their detailed biochemical parameters are not runtime-configurable. Only the high-level seeding geometry (depth bands, margins, counts) is configurable.
 - No per-physics-parameter CLI flags beyond run-control (`--ticks`, `--stats`, etc.). The TOML file is the primary physics interface.
 - `OutputConfig` does not control CSV column layout. Snapshot formats remain stable to avoid breaking downstream analysis scripts.
+
+## GPU Reaction-Diffusion Prototype (2026-04-25)
+
+### Gotchas
+
+1. **WGSL uniform arrays of `f32` failed validation under `wgpu` 29.**
+   The original planned `var<uniform>` params struct with `[f32; 12]` arrays produced a shader validation error because uniform array stride must satisfy stricter alignment. The implementation uses `var<storage, read>` for the small params struct instead. This is acceptable for v1 and keeps the Rust struct compact.
+
+2. **Shader constants are intentionally duplicated for v1.**
+   `src/gpu/shaders/field_diffuse.wgsl` hardcodes `GRID_X=128`, `GRID_Y=128`, `GRID_Z=64`, and `S_EXT=12`. `GpuFieldDiffuser::new()` performs release-mode runtime validation and returns `GpuError::InvalidInput` if `config.rs` drifts.
+
+3. **The GPU path is synchronous and copy-heavy.**
+   `GpuFieldDiffuser::diffuse_tick_with_cells()` uploads `field.data`, uploads occupancy as `u32`, dispatches one compute pass per diffusion substep, copies the final GPU buffer to a staging buffer, blocks on `device.poll`, then copies back into `field.data`. This preserves CPU-owned light/cells/output but is not the final architecture.
+
+4. **Occupancy semantics are covered by deterministic GPU tests.**
+   The WGSL path copies occupied voxels unchanged and treats occupied neighbors like walls by substituting the center concentration. Tests cover empty occupancy, center occupancy, boundary-adjacent occupancy, dense cluster occupancy, one substep, and default 10 substeps.
+
+5. **`--gpu-diffusion` falls back to CPU if initialization or dispatch fails.**
+   CPU diffusion remains the default even when compiled with `--features gpu`. If GPU initialization fails, the run logs a warning and continues on CPU.
+
+### Benchmark observation
+
+- On NVIDIA GeForce RTX 4060 via Vulkan, a 10-tick release run showed about 5.2s CPU vs about 1.2s GPU with upload/readback every tick. Treat this as coarse only; the simulation seed is random and no fine-grained upload/dispatch/readback timings are recorded yet.

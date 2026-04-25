@@ -10,7 +10,9 @@ pub fn transfer_reaction(donor: &Ruleset, recipient: &mut Ruleset, rng: &mut imp
         .filter(|&i| donor.reactions[i].v_max.abs() > 1e-9)
         .collect();
 
-    if active.is_empty() { return; }
+    if active.is_empty() {
+        return;
+    }
 
     // Pick a random active reaction from donor
     let donor_idx = active[rng.random_range(0..active.len())];
