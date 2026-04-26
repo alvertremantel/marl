@@ -1,3 +1,4 @@
+use marl::binary_dump;
 use marl::cell::*;
 use marl::config::*;
 use marl::data::DataLogger;
@@ -22,9 +23,13 @@ fn main() {
     let mut field = Field::new();
     let mut light = LightField::new();
 
-    // Create the data logger — opens ticks.csv and manages all file output.
-    let mut logger = DataLogger::new(&cfg.output.output_dir)
+    // Create the data logger for optional CSV diagnostics and summaries.
+    let mut logger = DataLogger::new(&cfg.output.output_dir, cfg.output.write_tick_log)
         .expect("Failed to create data logger / output directory");
+    let writes_binary = cfg.output.write_binary_field || cfg.output.write_binary_cells;
+    if writes_binary {
+        binary_dump::write_run_meta(&cfg.output).expect("Failed to write run metadata");
+    }
 
     // Start with empty field — let boundary sources build gradients organically.
     // Pre-load only a thin boundary layer so initial cells can bootstrap.
@@ -127,6 +132,10 @@ fn main() {
     let mut total_divisions: u64 = 0;
     let mut total_deaths: u64 = 0;
     let start = Instant::now();
+    let writes_images = !cfg.output.xz_snapshot_species.is_empty()
+        || !cfg.output.xy_slice_depths_frac.is_empty()
+        || cfg.output.write_density_map
+        || cfg.output.write_ancestry_map;
 
     // Track per-tick division/death counts for the data logger
     let mut tick_divisions: u64;
@@ -253,7 +262,7 @@ fn main() {
 
         // === STEP 6: Data logging and periodic output ===
 
-        // Log every tick to ticks.csv (lightweight — just one CSV row)
+        // Optionally log every tick to ticks.csv (lightweight — just one CSV row)
         if let Err(e) = logger.log_tick(tick as u64, &cells, tick_divisions, tick_deaths) {
             eprintln!("Warning: failed to log tick {}: {}", tick, e);
         }
@@ -271,31 +280,53 @@ fn main() {
             );
         }
 
-        // Write detailed CSV snapshots (chemistry profiles + cell dumps + reactions)
+        // Write raw binary snapshots for viewer ingestion.
         if tick % cfg.output.snapshot_interval == 0 || tick == cfg.output.max_ticks - 1 {
             let t = tick as u64;
-            if let Err(e) = logger.snapshot_chemistry(t, &field, &light) {
-                eprintln!(
-                    "Warning: failed to write chemistry snapshot at tick {}: {}",
-                    tick, e
-                );
+            if cfg.output.write_binary_field {
+                if let Err(e) = binary_dump::write_field_dump(&field, t, &cfg.output.output_dir) {
+                    eprintln!(
+                        "Warning: failed to write binary field snapshot at tick {}: {}",
+                        tick, e
+                    );
+                }
             }
-            if let Err(e) = logger.snapshot_cells(t, &cells) {
-                eprintln!(
-                    "Warning: failed to write cell snapshot at tick {}: {}",
-                    tick, e
-                );
+            if cfg.output.write_binary_cells {
+                if let Err(e) = binary_dump::write_cell_dump(&cells, t, &cfg.output.output_dir) {
+                    eprintln!(
+                        "Warning: failed to write binary cell snapshot at tick {}: {}",
+                        tick, e
+                    );
+                }
             }
-            if let Err(e) = logger.snapshot_reactions(t, &cells) {
-                eprintln!(
-                    "Warning: failed to write reaction snapshot at tick {}: {}",
-                    tick, e
-                );
+
+            // Optional legacy CSV snapshots (chemistry profiles + cell dumps + reactions).
+            if cfg.output.write_csv_snapshots {
+                if let Err(e) = logger.snapshot_chemistry(t, &field, &light) {
+                    eprintln!(
+                        "Warning: failed to write chemistry snapshot at tick {}: {}",
+                        tick, e
+                    );
+                }
+                if let Err(e) = logger.snapshot_cells(t, &cells) {
+                    eprintln!(
+                        "Warning: failed to write cell snapshot at tick {}: {}",
+                        tick, e
+                    );
+                }
+                if let Err(e) = logger.snapshot_reactions(t, &cells) {
+                    eprintln!(
+                        "Warning: failed to write reaction snapshot at tick {}: {}",
+                        tick, e
+                    );
+                }
             }
         }
 
         // Write PPM image snapshots (cross-sections, density maps)
-        if tick % cfg.output.image_interval == 0 || tick == cfg.output.max_ticks - 1 {
+        if writes_images
+            && (tick % cfg.output.image_interval == 0 || tick == cfg.output.max_ticks - 1)
+        {
             if let Err(e) = snapshot::write_all_snapshots(
                 &field,
                 &light,
@@ -343,13 +374,15 @@ fn main() {
     }
 
     // Write the reaction registry — maps IDs back to topologies for the CLI tool
-    if let Err(e) = logger.write_registry() {
-        eprintln!("Warning: failed to write reaction registry: {}", e);
-    } else {
-        println!(
-            "Reaction registry: {} unique topologies observed",
-            logger.registry.count()
-        );
+    if cfg.output.write_csv_snapshots {
+        if let Err(e) = logger.write_registry() {
+            eprintln!("Warning: failed to write reaction registry: {}", e);
+        } else {
+            println!(
+                "Reaction registry: {} unique topologies observed",
+                logger.registry.count()
+            );
+        }
     }
 
     // Write ancestry-colored XZ cross-section (red=photo, green=chemo, blue=anaerobe)

@@ -1,5 +1,24 @@
 # MARL Implementation Notes
 
+## Engine Viewer Data Pipeline (2026-04-25)
+
+### Durable decisions
+
+1. **Binary viewer output is the default data product.**
+   `write_binary_field` and `write_binary_cells` default to `true`; `write_tick_log`, `write_csv_snapshots`, `write_ancestry_map`, and `write_density_map` default to `false`.
+
+2. **Field dump layout is exact Rust field memory order.**
+   `tick_<T>.field.bin` is raw little-endian `f32` values from `Field::data`, laid out as `[z][y][x][species]`. At `128x128x64` and `S_EXT=12`, each field file is `50,331,648` bytes.
+
+3. **Cell dump records are packed and headerless.**
+   `tick_<T>.cells.bin` is a contiguous array of 25-byte `ViewerCell` records: `pos:f32[3]`, `lineage_id:u64`, `starter_type:u8`, `energy:f32`. The viewer should derive cell count from `file_size / cell_record_stride`.
+
+4. **`ViewerCell` is `#[repr(C, packed)]`.**
+   Do not take references to multi-byte fields of a packed record. Copy values by value or cast the whole slice to bytes.
+
+5. **Metadata is conditional on binary output.**
+   `run_meta.json` is written only when at least one binary output type is enabled, and records binary toggles plus layout details.
+
 ## Unified Runtime Configuration (2026-04-25)
 
 ### Gotchas

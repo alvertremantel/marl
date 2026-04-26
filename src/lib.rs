@@ -1,3 +1,4 @@
+pub mod binary_dump;
 pub mod cell;
 pub mod config;
 pub mod data;

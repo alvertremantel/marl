@@ -31,7 +31,7 @@ This repository is a functional prototype, not a polished platform. The core sim
 - Computes a per-voxel light field from top-down attenuation
 - Updates each cell through receptor, transport, reaction, effector, and fate phases
 - Supports mutation of kinetic parameters and rare structural rewiring of reactions
-- Logs run-level CSVs, periodic chemistry/cell/reaction snapshots, a Markdown summary, and PPM image snapshots
+- Writes raw binary field/cell snapshots for viewer ingestion, plus optional legacy CSV/PPM diagnostics
 
 ## Architecture At A Glance
 
@@ -88,8 +88,8 @@ Supported CLI flags (override TOML values):
 - `--config <path>` — path to TOML config file (default: `marl.toml` in CWD)
 - `--ticks <n>` — total simulation ticks
 - `--stats <n>` — stdout stats interval
-- `--snapshot <n>` — CSV snapshot interval
-- `--images <n>` — PPM image snapshot interval
+- `--snapshot <n>` — binary and optional CSV snapshot interval
+- `--images <n>` — optional PPM image snapshot interval
 - `--seed <n>` — cells to seed per starter metabolism
 - `--output <dir>` — output directory
 
@@ -97,15 +97,18 @@ Grid dimensions are compile-time constants in `src/config.rs`, so changing grid 
 
 ## Outputs
 
-Runs write into an output directory like `output/run_128x128x64` and produce:
+Runs write into an output directory like `output/run_128x128x64` and produce by default:
 
-- `ticks.csv`: per-tick population and z-layer counts
-- `chem_<tick>.csv`: z-layer averaged chemistry and light
-- `cells_<tick>.csv`: per-cell state snapshots
-- `reactions_<tick>.csv`: per-cell active reaction topology IDs
-- `reaction_registry.csv`: topology ID to reaction mapping
+- `run_meta.json`: grid dimensions, species count, snapshot cadence, and binary layouts
+- `tick_<T>.field.bin`: raw `f32` field data in `[z][y][x][species]` order
+- `tick_<T>.cells.bin`: packed viewer cell records (`pos`, `lineage_id`, `starter_type`, `energy`)
 - `summary.md`: end-of-run run summary
-- `*.ppm`: cross-sections, density maps, and ancestry maps
+
+Legacy diagnostics are opt-in via `marl.toml`:
+
+- `ticks.csv`: per-tick population and z-layer counts (`write_tick_log = true`)
+- `chem_<tick>.csv`, `cells_<tick>.csv`, `reactions_<tick>.csv`, `reaction_registry.csv`: CSV snapshots (`write_csv_snapshots = true`)
+- `*.ppm`: cross-sections, density maps, and ancestry maps (set `xz_snapshot_species`, `xy_slice_depths_frac`, `write_density_map`, or `write_ancestry_map`)
 
 ## Status Summary
 

@@ -1,13 +1,13 @@
-//! Data output module — records simulation state to CSV files.
+//! Optional CSV diagnostics and end-of-run summaries.
 //!
 //! This module writes two kinds of output:
 //!
 //! 1. **ticks.csv** — one row per simulation tick with population-level summary
 //!    statistics (population count, average energy, enzyme levels, spatial
-//!    distribution by z-layer, etc.). Appended every tick.
+//!    distribution by z-layer, etc.). Appended every tick when enabled.
 //!
 //! 2. **Periodic snapshots** — detailed per-cell and per-voxel chemistry dumps
-//!    written at configurable intervals:
+//!    written at configurable intervals when enabled:
 //!    - `chem_<tick>.csv`  — z-layer-averaged chemical concentrations
 //!    - `cells_<tick>.csv` — full dump of every living cell's state
 //!
@@ -125,7 +125,7 @@ pub struct DataLogger {
 
     /// Buffered writer for ticks.csv — kept open for the entire run so we
     /// only pay the file-open cost once.
-    ticks_writer: BufWriter<File>,
+    ticks_writer: Option<BufWriter<File>>,
 
     /// Registry mapping reaction topologies to stable integer IDs.
     /// Populated incrementally as new topologies are observed.
@@ -136,37 +136,42 @@ impl DataLogger {
     /// Create a new DataLogger.
     ///
     /// - Creates `output_dir` if it doesn't already exist.
-    /// - Opens `ticks.csv` inside that directory and writes the header row.
+    /// - Optionally opens `ticks.csv` inside that directory and writes the header row.
     ///
     /// # Errors
     /// Returns `std::io::Error` if directory creation or file opening fails.
-    pub fn new(output_dir: &str) -> Result<Self> {
+    pub fn new(output_dir: &str, write_tick_log: bool) -> Result<Self> {
         // Create the output directory (and any missing parents).
         let dir = PathBuf::from(output_dir);
         fs::create_dir_all(&dir)?;
 
-        // Open ticks.csv and write the header line.
-        let ticks_path = dir.join("ticks.csv");
-        let file = File::create(&ticks_path)?;
-        let mut writer = BufWriter::new(file);
+        let ticks_writer = if write_tick_log {
+            // Open ticks.csv and write the header line.
+            let ticks_path = dir.join("ticks.csv");
+            let file = File::create(&ticks_path)?;
+            let mut writer = BufWriter::new(file);
 
-        // Build header: fixed columns first, then one column per z-layer.
-        // The z-layer columns let you see vertical population stratification
-        // over time — important for checking whether cells self-organize into
-        // depth-dependent niches (the Winogradsky hypothesis).
-        write!(
-            writer,
-            "tick,population,avg_energy,avg_enzyme_a,avg_enzyme_b,avg_active_rxns,divisions_this_tick,deaths_this_tick"
-        )?;
-        for z in 0..GRID_Z {
-            write!(writer, ",z{}_cells", z)?;
-        }
-        writeln!(writer)?;
-        writer.flush()?;
+            // Build header: fixed columns first, then one column per z-layer.
+            // The z-layer columns let you see vertical population stratification
+            // over time — important for checking whether cells self-organize into
+            // depth-dependent niches (the Winogradsky hypothesis).
+            write!(
+                writer,
+                "tick,population,avg_energy,avg_enzyme_a,avg_enzyme_b,avg_active_rxns,divisions_this_tick,deaths_this_tick"
+            )?;
+            for z in 0..GRID_Z {
+                write!(writer, ",z{}_cells", z)?;
+            }
+            writeln!(writer)?;
+            writer.flush()?;
+            Some(writer)
+        } else {
+            None
+        };
 
         Ok(Self {
             output_dir: dir,
-            ticks_writer: writer,
+            ticks_writer,
             registry: ReactionRegistry::new(),
         })
     }
@@ -194,6 +199,10 @@ impl DataLogger {
         divisions: u64,
         deaths: u64,
     ) -> Result<()> {
+        let Some(writer) = self.ticks_writer.as_mut() else {
+            return Ok(());
+        };
+
         let pop = cells.len() as f64;
 
         // Accumulate sums for averaging. Use f64 to avoid precision loss
@@ -243,7 +252,7 @@ impl DataLogger {
 
         // Write the fixed columns.
         write!(
-            self.ticks_writer,
+            writer,
             "{},{},{:.6},{:.6},{:.6},{:.4},{},{}",
             tick,
             cells.len(),
@@ -257,14 +266,14 @@ impl DataLogger {
 
         // Write per-z-layer cell counts.
         for z in 0..GRID_Z {
-            write!(self.ticks_writer, ",{}", z_counts[z])?;
+            write!(writer, ",{}", z_counts[z])?;
         }
-        writeln!(self.ticks_writer)?;
+        writeln!(writer)?;
 
         // Flush periodically so that if the process crashes we don't lose
         // too many ticks of data. BufWriter batches the small writes above
         // into fewer syscalls, so this flush is the only one that hits disk.
-        self.ticks_writer.flush()?;
+        writer.flush()?;
 
         Ok(())
     }

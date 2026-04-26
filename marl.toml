@@ -68,7 +68,14 @@ image_interval = 500
 seed_count = 30
 output_dir = "output/run_128x128x64"
 
-xz_snapshot_species = [1, 2, 3, 4]
-xy_slice_depths_frac = [0.0, 0.25, 0.5, 0.75]
-write_ancestry_map = true
-write_density_map = true
+write_binary_field = true
+write_binary_cells = true
+
+# Legacy CSV/PPM outputs are off by default. Re-enable these for lightweight
+# diagnostics instead of full-fidelity viewer ingestion.
+write_tick_log = false
+write_csv_snapshots = false
+xz_snapshot_species = []
+xy_slice_depths_frac = []
+write_ancestry_map = false
+write_density_map = false

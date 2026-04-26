@@ -180,6 +180,10 @@ pub struct OutputConfig {
     pub xy_slice_depths_frac: Vec<f32>,
 
     // Toggle image types
+    pub write_binary_field: bool,
+    pub write_binary_cells: bool,
+    pub write_tick_log: bool,
+    pub write_csv_snapshots: bool,
     pub write_ancestry_map: bool,
     pub write_density_map: bool,
 }
@@ -193,10 +197,14 @@ impl Default for OutputConfig {
             image_interval: 500,
             seed_count: 30,
             output_dir: format!("output/run_{}x{}x{}", GRID_X, GRID_Y, GRID_Z),
-            xz_snapshot_species: vec![1, 2, 3, 4],
-            xy_slice_depths_frac: vec![0.0, 0.25, 0.5, 0.75],
-            write_ancestry_map: true,
-            write_density_map: true,
+            xz_snapshot_species: Vec::new(),
+            xy_slice_depths_frac: Vec::new(),
+            write_binary_field: true,
+            write_binary_cells: true,
+            write_tick_log: false,
+            write_csv_snapshots: false,
+            write_ancestry_map: false,
+            write_density_map: false,
         }
     }
 }
