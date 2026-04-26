@@ -1,8 +1,8 @@
 #![cfg(feature = "gpu")]
 
-use marl::config::{GRID_X, GRID_Y, GRID_Z, S_EXT, SimulationConfig};
-use marl::field::Field;
-use marl::gpu::{GpuError, GpuFieldDiffuser};
+use marl_engine::config::{GRID_X, GRID_Y, GRID_Z, S_EXT, SimulationConfig};
+use marl_engine::field::Field;
+use marl_engine::gpu::{GpuError, GpuFieldDiffuser};
 
 fn init_field(field: &mut Field) {
     for z in 0..GRID_Z {

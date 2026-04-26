@@ -1,11 +1,30 @@
 # MARL Implementation Notes
 
+## Workspace Crate Decomposition (2026-04-25)
+
+### Durable decisions
+
+1. **The root manifest is a virtual Cargo workspace.**
+   The Rust packages now live under `crates/`, leaving the repository root for shared docs/config/output and a possible future Python/uv project. No Python/uv scaffolding exists yet.
+
+2. **The engine and viewer are separate packages.**
+   `marl-engine` owns simulation code and the optional `gpu` diffusion feature. `marl-viewer-rs` owns `winit`/viewer `wgpu` rendering dependencies, so engine builds no longer need a viewer feature gate.
+
+3. **`marl-format` owns binary interop schema.**
+   Shared constants, `RunMeta`, `field_byte_len`, and `ViewerCellRecord` live in `crates/marl-format`. The engine still manually writes full `run_meta.json` to preserve all historical fields, but uses shared constants and the shared packed cell record.
+
+4. **Old metadata remains readable.**
+   `RunMeta::m_int` uses `#[serde(default)]` so older `run_meta.json` files without `m_int` still deserialize. New engine metadata includes `m_int`.
+
+5. **Main files are thinner but the simulation loop remains centralized.**
+   Engine `main.rs` still owns the tick loop, while helper code moved to `crates/marl-engine/src/sim/`. Viewer `main.rs` is now orchestration only, with CLI/loading/rendering/app code in focused modules.
+
 ## Standalone WGPU Viewer Phase 1 (2026-04-25)
 
 ### Durable decisions
 
 1. **Viewer dependencies are feature-gated.**
-   The `marl-viewer` binary is declared with `required-features = ["viewer"]`, so default engine builds do not pull in `winit`/windowing dependencies.
+   Superseded by the workspace split: viewer dependencies now live in the separate `marl-viewer-rs` package, so default engine builds do not pull in `winit`/windowing dependencies.
 
 2. **Phase 1 renders one snapshot and one species.**
    The viewer reads `run_meta.json`, loads `tick_<T>.field.bin`, validates the binary layout, and uploads the selected snapshot once. Two-snapshot interpolation, async streaming, cell rendering, and voxel picking remain future work.

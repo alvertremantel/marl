@@ -5,6 +5,7 @@ pub mod data;
 pub mod field;
 pub mod hgt;
 pub mod light;
+pub mod sim;
 pub mod snapshot;
 
 #[cfg(feature = "gpu")]

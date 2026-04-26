@@ -13,7 +13,7 @@ The current codebase is a Winogradsky-column style simulation: oxidant and carbo
 ## Current State
 
 - Language: Rust
-- Execution model: CPU only
+- Execution model: CPU default, optional GPU field diffusion prototype
 - Default grid: `128 x 128 x 64`
 - Transport medium: diffusion only
 - Cell occupancy: one cell per voxel
@@ -35,15 +35,16 @@ This repository is a functional prototype, not a polished platform. The core sim
 
 ## Architecture At A Glance
 
-- `src/config.rs`: compile-time grid constants and runtime config structs (TOML + CLI)
-- `src/field.rs`: 3D extracellular chemistry and parallel diffusion
-- `src/cell.rs`: cell rulesets, cell tick, mutation logic, lineage state
-- `src/light.rs`: top-down light attenuation field
-- `src/hgt.rs`: horizontal gene transfer helper
-- `src/data.rs`: CSV logging, reaction registry, end-of-run summary
-- `src/snapshot.rs`: PPM cross-sections and ancestry images
-- `src/main.rs`: seeding, simulation loop, births/deaths, orchestration
-- `src/bin/marl-viewer.rs`: feature-gated standalone `wgpu` binary viewer for binary field snapshots
+- `crates/marl-engine/src/config.rs`: compile-time grid constants and runtime config structs (TOML + CLI)
+- `crates/marl-engine/src/field.rs`: 3D extracellular chemistry and parallel diffusion
+- `crates/marl-engine/src/cell.rs`: cell rulesets, cell tick, mutation logic, lineage state
+- `crates/marl-engine/src/light.rs`: top-down light attenuation field
+- `crates/marl-engine/src/sim/`: seeding, spatial helpers, starter metabolisms, and stats helpers
+- `crates/marl-engine/src/main.rs`: engine binary orchestration and tick loop
+- `crates/marl-engine/src/data.rs`: CSV logging, reaction registry, end-of-run summary
+- `crates/marl-engine/src/snapshot.rs`: PPM cross-sections and ancestry images
+- `crates/marl-format/`: shared binary metadata and cell-record schema for engine/viewer interop
+- `crates/marl-viewer-rs/`: standalone `wgpu` binary viewer for binary field snapshots
 
 More detail lives in `INFO.md`.
 
@@ -61,7 +62,7 @@ More detail lives in `INFO.md`.
 - Receptors are computed each tick but are not yet used to gate transport or reactions.
 - `hgt.rs` is implemented, but HGT is currently disabled in the main loop.
 - The code includes spare external and internal species capacity for future chemistry.
-- The project is CPU-only today despite earlier GPU-oriented ambitions.
+- GPU diffusion exists as an optional prototype behind the engine crate's `gpu` feature.
 
 
 ## Running
@@ -69,7 +70,7 @@ More detail lives in `INFO.md`.
 Build and run with Cargo:
 
 ```bash
-cargo run --release -- --ticks 5000 --stats 100 --snapshot 500 --images 500
+cargo run -p marl-engine --release -- --ticks 5000 --stats 100 --snapshot 500 --images 500
 ```
 
 ### Runtime Configuration
@@ -79,7 +80,7 @@ All physics, chemistry, biology, and output parameters are runtime-configurable 
 Load settings from a TOML file:
 
 ```bash
-cargo run --release -- --config marl.toml
+cargo run -p marl-engine --release -- --config marl.toml
 ```
 
 A sample `marl.toml` with all defaults is included in the repository. Copy it and modify values for parameter sweeps or reproducible scenarios. Partial TOML files work — missing keys fall back to built-in defaults.
@@ -94,7 +95,7 @@ Supported CLI flags (override TOML values):
 - `--seed <n>` — cells to seed per starter metabolism
 - `--output <dir>` — output directory
 
-Grid dimensions are compile-time constants in `src/config.rs`, so changing grid size requires recompilation.
+Grid dimensions are compile-time constants in `crates/marl-engine/src/config.rs`, so changing grid size requires recompilation.
 
 ## Outputs
 
@@ -119,10 +120,10 @@ python scripts/check_binary_dump.py output/run_128x128x64 0
 
 ## Standalone Viewer
 
-Phase 1 of the standalone `wgpu` viewer is available behind the `viewer` feature. It reads `run_meta.json`, uploads a field snapshot as a 3D `R32Float` texture, and raymarches one external species through the volume.
+Phase 1 of the standalone `wgpu` viewer lives in its own workspace crate. It reads `run_meta.json`, uploads a field snapshot as a 3D `R32Float` texture, and raymarches one external species through the volume.
 
 ```bash
-cargo run --release --features viewer --bin marl-viewer -- output/run_128x128x64 --tick 0 --species 1
+cargo run -p marl-viewer-rs --release -- output/run_128x128x64 --tick 0 --species 1
 ```
 
 Useful viewer flags: `--species <n>`, `--tick <n>`, `--scale <f>`, `--exposure <f>`, and `--steps <n>`.

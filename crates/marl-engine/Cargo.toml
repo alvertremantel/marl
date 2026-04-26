@@ -1,0 +1,23 @@
+[package]
+name = "marl-engine"
+version.workspace = true
+edition.workspace = true
+
+[features]
+default = []
+gpu = ["dep:bytemuck", "dep:pollster", "dep:wgpu"]
+
+[[bin]]
+name = "marl-engine"
+path = "src/main.rs"
+
+[dependencies]
+marl-format = { path = "../marl-format" }
+rand.workspace = true
+rand_distr.workspace = true
+rayon.workspace = true
+serde.workspace = true
+toml.workspace = true
+bytemuck = { workspace = true, optional = true }
+pollster = { workspace = true, optional = true }
+wgpu = { workspace = true, optional = true }

@@ -2,6 +2,36 @@
 
 ## Current Branch: tweak/outputs
 
+## Completed: Workspace Crate Decomposition (2026-04-25)
+
+The repository is now a Cargo workspace with separate engine, viewer, and shared binary format crates. The root directory is no longer a Rust package, leaving room for project-level files and a future Python/uv component without scaffolding one now.
+
+### What changed
+- `Cargo.toml`: converted to a virtual workspace with `crates/marl-engine`, `crates/marl-viewer-rs`, and `crates/marl-format`
+- `crates/marl-engine/`: owns the simulation library and `marl-engine` binary; optional GPU diffusion remains behind the `gpu` feature
+- `crates/marl-format/`: owns shared binary schema constants, `RunMeta`, field byte-length validation, and the packed 25-byte `ViewerCellRecord`
+- `crates/marl-viewer-rs/`: owns the standalone `wgpu` viewer binary without a `viewer` feature gate
+- `crates/marl-engine/src/sim/`: extracted seeding, spatial, starter metabolism, and stats helpers from the engine binary
+- `crates/marl-viewer-rs/src/{args,io,renderer,app}.rs`: split viewer CLI, loading, rendering, and app/event-loop code
+- `README.md` / `.agents/context/MAP.md` / `.agents/context/NOTES.md`: updated for workspace paths and commands
+
+### Verification
+- `cargo fmt --all`: passes
+- `cargo check --workspace`: passes
+- `cargo build --workspace`: passes
+- `cargo test -p marl-format`: passes
+- `cargo test -p marl-engine`: passes
+- `cargo check -p marl-engine --features gpu`: passes
+- `cargo run -p marl-viewer-rs -- --help`: prints CLI help
+- `cargo run -p marl-engine -- --ticks 2 --stats 1 --snapshot 1 --images 1000 --output output/workspace_smoke`: succeeds
+- `python scripts/check_binary_dump.py output/workspace_smoke 1`: passes
+
+### Notes
+- Engine commands now use `cargo run -p marl-engine -- ...`.
+- Viewer commands now use `cargo run -p marl-viewer-rs -- ...`.
+- `marl-format::RunMeta` defaults `m_int` during deserialization so older metadata without that field remains readable; new engine metadata writes `m_int`.
+- No Python/uv files were created.
+
 ## Completed: Standalone WGPU Viewer Phase 1 (2026-04-25)
 
 The repository now has a separate, feature-gated `marl-viewer` binary that ingests engine binary field snapshots and renders one species with a basic GPU raymarch pass.

@@ -1,0 +1,17 @@
+[package]
+name = "marl-viewer-rs"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "marl-viewer-rs"
+path = "src/main.rs"
+
+[dependencies]
+marl-format = { path = "../marl-format" }
+bytemuck.workspace = true
+pollster.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+wgpu.workspace = true
+winit.workspace = true
