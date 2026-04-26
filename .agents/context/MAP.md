@@ -14,6 +14,11 @@
 - `src/snapshot.rs`: optional PPM cross-sections, density maps, and ancestry maps
 - `marl.toml`: sample runtime config with binary outputs on and legacy diagnostics off by default
 
+## Standalone Viewer
+- `src/bin/marl-viewer.rs`: optional `viewer` feature binary; parses `run_meta.json`, loads one field snapshot, opens a `winit`/`wgpu` window, and drives rendering
+- `src/bin/viewer_raymarch.wgsl`: full-screen raymarch shader for a selected external species in the packed 3D field texture
+- `Cargo.toml`: declares `viewer` feature and `marl-viewer` binary with `required-features = ["viewer"]`
+
 ## GPU Prototype
 - `src/gpu/`: optional `gpu` feature implementation for field diffusion
 - `src/gpu/shaders/field_diffuse.wgsl`: WGSL compute shader with currently duplicated grid/species constants

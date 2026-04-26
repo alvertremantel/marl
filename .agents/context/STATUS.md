@@ -2,6 +2,29 @@
 
 ## Current Branch: tweak/outputs
 
+## Completed: Standalone WGPU Viewer Phase 1 (2026-04-25)
+
+The repository now has a separate, feature-gated `marl-viewer` binary that ingests engine binary field snapshots and renders one species with a basic GPU raymarch pass.
+
+### What changed
+- `Cargo.toml` / `Cargo.lock`: added optional `viewer` feature with `winit`, `serde_json`, `wgpu`, `pollster`, and `bytemuck`
+- `src/bin/marl-viewer.rs`: parses CLI flags, validates `run_meta.json`, loads `tick_<T>.field.bin`, creates a `winit`/`wgpu` window, uploads the field as a 3D `R32Float` texture, and renders continuously
+- `src/bin/viewer_raymarch.wgsl`: full-screen triangle shader that raymarches the selected external species through the z volume
+- `README.md`: documented viewer usage and tuning flags
+
+### Verification
+- `cargo fmt`: passes
+- `cargo check`: passes
+- `cargo check --features viewer --bin marl-viewer`: passes
+- `cargo check --features gpu`: passes
+- `cargo test`: passes
+- `cargo run --features viewer --bin marl-viewer -- --help`: prints CLI help
+
+### Immediate next steps
+- Add the planned two-snapshot streaming/interpolation pipeline.
+- Add cell buffer ingestion/instanced rendering.
+- Add camera/ray/AABB picking for exact voxel queries.
+
 ## Completed: Engine Viewer Data Pipeline (2026-04-25)
 
 The simulation now emits raw binary data for high-fidelity viewer ingestion by default, with legacy CSV/PPM diagnostics opt-in.

@@ -6,6 +6,12 @@ edition = "2024"
 [features]
 default = []
 gpu = ["dep:bytemuck", "dep:pollster", "dep:wgpu"]
+viewer = ["dep:bytemuck", "dep:pollster", "dep:serde_json", "dep:wgpu", "dep:winit"]
+
+[[bin]]
+name = "marl-viewer"
+path = "src/bin/marl-viewer.rs"
+required-features = ["viewer"]
 
 [dependencies]
 rand = "0.9"
@@ -15,4 +21,6 @@ serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 bytemuck = { version = "1.25", features = ["derive"], optional = true }
 pollster = { version = "0.4", optional = true }
+serde_json = { version = "1", optional = true }
 wgpu = { version = "29", optional = true }
+winit = { version = "0.30", optional = true }

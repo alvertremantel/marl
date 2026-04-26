@@ -43,6 +43,7 @@ This repository is a functional prototype, not a polished platform. The core sim
 - `src/data.rs`: CSV logging, reaction registry, end-of-run summary
 - `src/snapshot.rs`: PPM cross-sections and ancestry images
 - `src/main.rs`: seeding, simulation loop, births/deaths, orchestration
+- `src/bin/marl-viewer.rs`: feature-gated standalone `wgpu` binary viewer for binary field snapshots
 
 More detail lives in `INFO.md`.
 
@@ -115,6 +116,16 @@ Validate a binary output tick with:
 ```bash
 python scripts/check_binary_dump.py output/run_128x128x64 0
 ```
+
+## Standalone Viewer
+
+Phase 1 of the standalone `wgpu` viewer is available behind the `viewer` feature. It reads `run_meta.json`, uploads a field snapshot as a 3D `R32Float` texture, and raymarches one external species through the volume.
+
+```bash
+cargo run --release --features viewer --bin marl-viewer -- output/run_128x128x64 --tick 0 --species 1
+```
+
+Useful viewer flags: `--species <n>`, `--tick <n>`, `--scale <f>`, `--exposure <f>`, and `--steps <n>`.
 
 ## Status Summary
 

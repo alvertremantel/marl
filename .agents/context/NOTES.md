@@ -1,5 +1,24 @@
 # MARL Implementation Notes
 
+## Standalone WGPU Viewer Phase 1 (2026-04-25)
+
+### Durable decisions
+
+1. **Viewer dependencies are feature-gated.**
+   The `marl-viewer` binary is declared with `required-features = ["viewer"]`, so default engine builds do not pull in `winit`/windowing dependencies.
+
+2. **Phase 1 renders one snapshot and one species.**
+   The viewer reads `run_meta.json`, loads `tick_<T>.field.bin`, validates the binary layout, and uploads the selected snapshot once. Two-snapshot interpolation, async streaming, cell rendering, and voxel picking remain future work.
+
+3. **3D texture layout packs species into texture X.**
+   Because the engine writes `[z][y][x][species]` floats, the viewer uploads the field as an `R32Float` 3D texture with dimensions `(grid_x * s_ext, grid_y, grid_z)`. Shader lookup computes `tex_x = voxel_x * s_ext + species`.
+
+4. **The raymarch shader uses `textureLoad`, not filtering.**
+   `R32Float` is bound as a non-filterable 3D texture. Current rendering samples exact voxel/species values and uses `--scale`, `--exposure`, and `--steps` as transfer-function controls.
+
+5. **`wgpu` 29 surface acquisition returns `CurrentSurfaceTexture`.**
+   The viewer handles `Success`, `Suboptimal`, `Timeout`, `Occluded`, `Outdated`, `Lost`, and `Validation` directly instead of using the older `Result<_, SurfaceError>` pattern.
+
 ## Engine Viewer Data Pipeline (2026-04-25)
 
 ### Durable decisions
