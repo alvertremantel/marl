@@ -110,6 +110,12 @@ Legacy diagnostics are opt-in via `marl.toml`:
 - `chem_<tick>.csv`, `cells_<tick>.csv`, `reactions_<tick>.csv`, `reaction_registry.csv`: CSV snapshots (`write_csv_snapshots = true`)
 - `*.ppm`: cross-sections, density maps, and ancestry maps (set `xz_snapshot_species`, `xy_slice_depths_frac`, `write_density_map`, or `write_ancestry_map`)
 
+Validate a binary output tick with:
+
+```bash
+python scripts/check_binary_dump.py output/run_128x128x64 0
+```
+
 ## Status Summary
 
 The project is already a real simulation rather than a scaffold. Its current strengths are the field/cell split, the spatial exclusion model, the seeded ecological gradient, and the data products. Its main unfinished areas are adaptive receptor wiring, re-enabled HGT, and broader chemistry expansion.

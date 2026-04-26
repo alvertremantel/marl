@@ -25,3 +25,4 @@
 - `.agents/context/STATUS.md`: current project status and completed work
 - `.agents/context/NOTES.md`: durable implementation decisions and gotchas
 - `.agents/context/MAP.md`: this concise structure map
+- `scripts/check_binary_dump.py`: quick binary output sanity checker
