@@ -6,18 +6,21 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::{Window, WindowId};
 
-use crate::io::FieldPayload;
+use crate::args::ViewerArgs;
+use crate::io::SnapshotPayload;
 use crate::renderer::{RenderResult, Renderer};
 
 pub(crate) struct ViewerApp {
-    payload: Option<FieldPayload>,
+    payload: Option<SnapshotPayload>,
+    args: Option<ViewerArgs>,
     renderer: Option<Renderer>,
 }
 
 impl ViewerApp {
-    pub(crate) fn new(payload: FieldPayload) -> Self {
+    pub(crate) fn new(payload: SnapshotPayload, args: ViewerArgs) -> Self {
         Self {
             payload: Some(payload),
+            args: Some(args),
             renderer: None,
         }
     }
@@ -38,6 +41,10 @@ impl ApplicationHandler for ViewerApp {
             event_loop.exit();
             return;
         };
+        let Some(args) = self.args.take() else {
+            event_loop.exit();
+            return;
+        };
 
         let attrs = Window::default_attributes()
             .with_title("MARL Viewer")
@@ -51,7 +58,7 @@ impl ApplicationHandler for ViewerApp {
             }
         };
 
-        match pollster::block_on(Renderer::new(window, payload)) {
+        match pollster::block_on(Renderer::new(window, payload, args)) {
             Ok(renderer) => self.renderer = Some(renderer),
             Err(e) => {
                 eprintln!("failed to initialize viewer renderer: {e}");
