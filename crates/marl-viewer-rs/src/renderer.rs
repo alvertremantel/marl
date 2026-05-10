@@ -1,14 +1,17 @@
 use std::borrow::Cow;
 use std::error::Error;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use wgpu::util::DeviceExt;
 use winit::dpi::PhysicalSize;
+use winit::event::WindowEvent;
 use winit::window::Window;
 
-use crate::args::{CellMode, ViewerArgs};
+use crate::args::{CellMode, ViewMode, ViewerArgs};
 use crate::camera::{CameraBasis, camera_basis};
-use crate::io::SnapshotPayload;
+use crate::gui::{GuiAction, GuiState, choose_initial_tick, neighbor_tick};
+use crate::io::{LoadedCell, SnapshotPayload, discover_field_ticks, load_run_meta, load_snapshot};
 
 // ---------------------------------------------------------------------------
 // ViewerParams — must be #[repr(C)], Pod, and mirror WGSL Params exactly
@@ -28,6 +31,37 @@ pub(crate) struct ViewerParams {
 }
 
 // ---------------------------------------------------------------------------
+// SnapshotGpuResources — reloadable GPU state for the active snapshot
+// ---------------------------------------------------------------------------
+
+struct SnapshotGpuResources {
+    bind_group: wgpu::BindGroup,
+    params_buffer: wgpu::Buffer,
+    params: ViewerParams,
+    _field_texture: wgpu::Texture,
+    _field_view: wgpu::TextureView,
+    _cell_texture: wgpu::Texture,
+    _cell_view: wgpu::TextureView,
+}
+
+// ---------------------------------------------------------------------------
+// SnapshotInfo — lightweight display metadata for GUI/summary
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub(crate) struct SnapshotInfo {
+    pub(crate) output_dir: PathBuf,
+    pub(crate) tick: u64,
+    pub(crate) species: u32,
+    pub(crate) view_mode: ViewMode,
+    pub(crate) cell_mode: CellMode,
+    pub(crate) cell_count: usize,
+    pub(crate) field_bytes: usize,
+    pub(crate) grid: [u32; 3],
+    pub(crate) s_ext: u32,
+}
+
+// ---------------------------------------------------------------------------
 // Renderer
 // ---------------------------------------------------------------------------
 
@@ -38,21 +72,19 @@ pub(crate) struct Renderer {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     pipeline: wgpu::RenderPipeline,
-    bind_group: wgpu::BindGroup,
-    params_buffer: wgpu::Buffer,
-    params: ViewerParams,
-    _field_texture: wgpu::Texture,
-    _field_view: wgpu::TextureView,
-    _cell_texture: Option<wgpu::Texture>,
-    _cell_view: Option<wgpu::TextureView>,
+    bind_group_layout: wgpu::BindGroupLayout,
+    snapshot: SnapshotGpuResources,
+    pub(crate) loaded_info: Option<SnapshotInfo>,
+    pub(crate) args: ViewerArgs,
+    // egui integration
+    egui_ctx: egui::Context,
+    egui_state: egui_winit::State,
+    egui_renderer: egui_wgpu::Renderer,
+    gui: GuiState,
 }
 
 impl Renderer {
-    pub(crate) async fn new(
-        window: Arc<Window>,
-        payload: SnapshotPayload,
-        args: ViewerArgs,
-    ) -> Result<Self, Box<dyn Error>> {
+    pub(crate) async fn new(window: Arc<Window>, args: ViewerArgs) -> Result<Self, Box<dyn Error>> {
         let size = window.inner_size();
         let instance = wgpu::Instance::default();
         let surface = instance.create_surface(window.clone())?;
@@ -106,77 +138,10 @@ impl Renderer {
         };
         surface.configure(&device, &config);
 
-        // Camera basis
-        let cam: CameraBasis = camera_basis(args.view_mode);
-
-        // Normalized box dimensions
-        let max_dim = payload
-            .meta
-            .grid_x
-            .max(payload.meta.grid_y)
-            .max(payload.meta.grid_z) as f32;
-        if max_dim <= 0.0 {
-            return Err("zero max grid dimension".into());
-        }
-        let axis_scale = [
-            payload.meta.grid_x as f32 / max_dim,
-            payload.meta.grid_y as f32 / max_dim,
-            payload.meta.grid_z as f32 / max_dim,
-            0.0,
-        ];
-
-        let cells_enabled = if payload.cell_mode == CellMode::Off {
-            0u32
-        } else {
-            1u32
-        };
-
-        let params = ViewerParams {
-            grid: [
-                payload.meta.grid_x,
-                payload.meta.grid_y,
-                payload.meta.grid_z,
-                payload.meta.s_ext,
-            ],
-            render: [config.width, config.height, payload.species, payload.steps],
-            transfer: [
-                payload.exposure,
-                payload.density_scale,
-                payload.cell_alpha,
-                0.0,
-            ],
-            axis_scale,
-            cam_right: [cam.right[0], cam.right[1], cam.right[2], cam.zoom],
-            cam_up: [cam.up[0], cam.up[1], cam.up[2], 0.0],
-            cam_dir: [cam.dir[0], cam.dir[1], cam.dir[2], 0.0],
-            options: [cells_enabled, 0, 0, 0],
-        };
-
-        // Field texture (existing)
-        let (field_texture, field_view) = create_field_texture(&device, &queue, &payload)?;
-
-        // Cell texture (new)
-        let (cell_texture, cell_view) = if cells_enabled != 0 {
-            let (tex, view) = create_cell_texture(&device, &queue, &payload, &args)?;
-            (Some(tex), Some(view))
-        } else {
-            // Bind an empty placeholder so the shader binding is always valid
-            let (tex, view) = create_empty_cell_texture(&device, &queue, &payload)?;
-            (Some(tex), Some(view))
-        };
-
-        // Params buffer
-        let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("MARL Viewer Params"),
-            contents: bytemuck::bytes_of(&params),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-
-        // Bind group layout
+        // Bind group layout (stored for reloading)
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("MARL Viewer Bind Group Layout"),
             entries: &[
-                // binding 0: field texture (3D, R32Float)
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::FRAGMENT,
@@ -187,7 +152,6 @@ impl Renderer {
                     },
                     count: None,
                 },
-                // binding 1: uniform params buffer
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
@@ -198,7 +162,6 @@ impl Renderer {
                     },
                     count: None,
                 },
-                // binding 2: cell texture (3D, Rgba8Uint)
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
                     visibility: wgpu::ShaderStages::FRAGMENT,
@@ -208,29 +171,6 @@ impl Renderer {
                         multisampled: false,
                     },
                     count: None,
-                },
-            ],
-        });
-
-        let cell_view_ref = cell_view
-            .as_ref()
-            .expect("cell texture view must exist after creation");
-
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("MARL Viewer Bind Group"),
-            layout: &bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&field_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: params_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::TextureView(cell_view_ref),
                 },
             ],
         });
@@ -270,17 +210,76 @@ impl Renderer {
             cache: None,
         });
 
-        window.set_title(&format!(
-            "MARL Viewer - tick {} species {} view {:?} cells {:?} ({} cells, {}x{}x{})",
-            payload.tick,
-            payload.species,
-            args.view_mode,
-            args.cell_mode,
-            payload.cells.len(),
-            payload.meta.grid_x,
-            payload.meta.grid_y,
-            payload.meta.grid_z
-        ));
+        // -------------------------------------------------------------------
+        // Initialize egui
+        // -------------------------------------------------------------------
+        let egui_ctx = egui::Context::default();
+        let egui_state = egui_winit::State::new(
+            egui_ctx.clone(),
+            egui::ViewportId::ROOT,
+            window.as_ref(),
+            Some(window.scale_factor() as f32),
+            window.theme(),
+            Some(device.limits().max_texture_dimension_2d as usize),
+        );
+        let egui_renderer = egui_wgpu::Renderer::new(
+            &device,
+            config.format,
+            egui_wgpu::RendererOptions::default(),
+        );
+        let gui = GuiState::new(&args);
+
+        // Try to load the initial snapshot; fall back to placeholder on failure.
+        let (snapshot, loaded_info) = match try_load_snapshot_resources(
+            &device,
+            &queue,
+            &bind_group_layout,
+            &args,
+            config.width,
+            config.height,
+        ) {
+            Ok((res, info)) => {
+                eprintln!(
+                    "[viewer] loaded tick {} species {} view {:?} cells {:?} ({} field bytes, {} cells)",
+                    info.tick,
+                    info.species,
+                    info.view_mode,
+                    info.cell_mode,
+                    info.field_bytes,
+                    info.cell_count
+                );
+                (res, Some(info))
+            }
+            Err(e) => {
+                eprintln!("[viewer] initial snapshot load failed: {e}");
+                let snap = create_placeholder_resources(
+                    &device,
+                    &queue,
+                    &bind_group_layout,
+                    &args,
+                    config.width,
+                    config.height,
+                )?;
+                (snap, None)
+            }
+        };
+
+        // Set window title
+        if let Some(ref info) = loaded_info {
+            window.set_title(&format!(
+                "MARL Viewer - tick {} species {} view {:?} cells {:?} ({} cells, {}x{}x{})",
+                info.tick,
+                info.species,
+                info.view_mode,
+                info.cell_mode,
+                info.cell_count,
+                info.grid[0],
+                info.grid[1],
+                info.grid[2]
+            ));
+        } else {
+            window.set_title("MARL Viewer - no snapshot loaded");
+        }
 
         Ok(Self {
             window,
@@ -289,14 +288,22 @@ impl Renderer {
             queue,
             config,
             pipeline,
-            bind_group,
-            params_buffer,
-            params,
-            _field_texture: field_texture,
-            _field_view: field_view,
-            _cell_texture: cell_texture,
-            _cell_view: cell_view,
+            bind_group_layout,
+            snapshot,
+            loaded_info,
+            args,
+            egui_ctx,
+            egui_state,
+            egui_renderer,
+            gui,
         })
+    }
+
+    /// Forward a window event to egui. Returns `true` if egui consumed the event
+    /// and a repaint is needed.
+    pub(crate) fn handle_window_event(&mut self, event: &WindowEvent) -> bool {
+        let response = self.egui_state.on_window_event(self.window.as_ref(), event);
+        response.repaint
     }
 
     pub(crate) fn resize(&mut self, size: PhysicalSize<u32>) {
@@ -307,13 +314,216 @@ impl Renderer {
         self.config.width = size.width;
         self.config.height = size.height;
         self.surface.configure(&self.device, &self.config);
-        self.params.render[0] = size.width;
-        self.params.render[1] = size.height;
-        self.queue
-            .write_buffer(&self.params_buffer, 0, bytemuck::bytes_of(&self.params));
+        self.snapshot.params.render[0] = size.width;
+        self.snapshot.params.render[1] = size.height;
+        self.queue.write_buffer(
+            &self.snapshot.params_buffer,
+            0,
+            bytemuck::bytes_of(&self.snapshot.params),
+        );
     }
 
     pub(crate) fn render(&mut self) -> RenderResult {
+        // -------------------------------------------------------------------
+        // 1. Collect egui input and build GUI
+        // -------------------------------------------------------------------
+        let raw_input = self.egui_state.take_egui_input(self.window.as_ref());
+        let egui_ctx = self.egui_ctx.clone();
+        egui_ctx.begin_pass(raw_input);
+
+        let loaded_ref = self.loaded_info.as_ref();
+        let actions = self.gui.show(&egui_ctx, loaded_ref, &self.args);
+
+        let full_output = egui_ctx.end_pass();
+
+        // Handle platform output (cursor changes, etc.)
+        self.egui_state
+            .handle_platform_output(self.window.as_ref(), full_output.platform_output.clone());
+
+        // Clipped primitives for rendering
+        let paint_jobs = egui_ctx.tessellate(full_output.shapes, full_output.pixels_per_point);
+        let screen_descriptor = egui_wgpu::ScreenDescriptor {
+            size_in_pixels: [self.config.width, self.config.height],
+            pixels_per_point: full_output.pixels_per_point,
+        };
+
+        // Update textures
+        for (id, image_delta) in &full_output.textures_delta.set {
+            self.egui_renderer
+                .update_texture(&self.device, &self.queue, *id, image_delta);
+        }
+
+        // -------------------------------------------------------------------
+        // 2. Process GUI actions
+        // -------------------------------------------------------------------
+        for action in actions {
+            match action {
+                GuiAction::OpenDirectoryDialog => {
+                    let current_dir = if self.args.output_dir.is_dir() {
+                        Some(self.args.output_dir.clone())
+                    } else {
+                        None
+                    };
+                    let picked = rfd::FileDialog::new()
+                        .set_directory(&current_dir.unwrap_or_else(|| PathBuf::from(".")))
+                        .pick_folder();
+                    if let Some(dir) = picked {
+                        self.gui.set_info(format!("loading {}…", dir.display()));
+                        match self.load_directory_from_gui(dir) {
+                            Ok(()) => {}
+                            Err(e) => self.gui.set_error(format!("load failed: {e}")),
+                        }
+                    }
+                }
+                GuiAction::LoadDirectory(dir) => {
+                    self.gui.set_info(format!("loading {}…", dir.display()));
+                    match self.load_directory_from_gui(dir) {
+                        Ok(()) => {}
+                        Err(e) => self.gui.set_error(format!("load failed: {e}")),
+                    }
+                }
+                GuiAction::LoadTick(tick) => {
+                    let new_args = ViewerArgs {
+                        tick,
+                        ..self.args.clone()
+                    };
+                    match self.apply_args(new_args) {
+                        Ok(info) => {
+                            let ticks =
+                                discover_field_ticks(&self.args.output_dir).unwrap_or_default();
+                            self.gui.sync_loaded(&info, &self.args, ticks);
+                        }
+                        Err(e) => {
+                            self.gui
+                                .set_error(format!("failed to load tick {tick}: {e}"));
+                        }
+                    }
+                }
+                GuiAction::ReloadCurrent => {
+                    self.gui.set_info("reloading…".to_string());
+                    match self.apply_args(self.args.clone()) {
+                        Ok(info) => {
+                            let ticks =
+                                discover_field_ticks(&self.args.output_dir).unwrap_or_default();
+                            self.gui.sync_loaded(&info, &self.args, ticks);
+                        }
+                        Err(e) => {
+                            self.gui.set_error(format!("reload failed: {e}"));
+                        }
+                    }
+                }
+                GuiAction::FirstTick => {
+                    if let Some(&tick) = self.gui.available_ticks.first() {
+                        self.gui.tick_text = tick.to_string();
+                        let new_args = ViewerArgs {
+                            tick,
+                            ..self.args.clone()
+                        };
+                        match self.apply_args(new_args) {
+                            Ok(info) => {
+                                let ticks =
+                                    discover_field_ticks(&self.args.output_dir).unwrap_or_default();
+                                self.gui.sync_loaded(&info, &self.args, ticks);
+                            }
+                            Err(e) => {
+                                self.gui
+                                    .set_error(format!("failed to load tick {tick}: {e}"));
+                            }
+                        }
+                    }
+                }
+                GuiAction::LastTick => {
+                    if let Some(&tick) = self.gui.available_ticks.last() {
+                        self.gui.tick_text = tick.to_string();
+                        let new_args = ViewerArgs {
+                            tick,
+                            ..self.args.clone()
+                        };
+                        match self.apply_args(new_args) {
+                            Ok(info) => {
+                                let ticks =
+                                    discover_field_ticks(&self.args.output_dir).unwrap_or_default();
+                                self.gui.sync_loaded(&info, &self.args, ticks);
+                            }
+                            Err(e) => {
+                                self.gui
+                                    .set_error(format!("failed to load tick {tick}: {e}"));
+                            }
+                        }
+                    }
+                }
+                GuiAction::PrevTick => {
+                    let current = self.args.tick;
+                    if let Some(tick) = neighbor_tick(current, &self.gui.available_ticks, -1) {
+                        self.gui.tick_text = tick.to_string();
+                        let new_args = ViewerArgs {
+                            tick,
+                            ..self.args.clone()
+                        };
+                        match self.apply_args(new_args) {
+                            Ok(info) => {
+                                let ticks =
+                                    discover_field_ticks(&self.args.output_dir).unwrap_or_default();
+                                self.gui.sync_loaded(&info, &self.args, ticks);
+                            }
+                            Err(e) => {
+                                self.gui
+                                    .set_error(format!("failed to load tick {tick}: {e}"));
+                            }
+                        }
+                    }
+                }
+                GuiAction::NextTick => {
+                    let current = self.args.tick;
+                    if let Some(tick) = neighbor_tick(current, &self.gui.available_ticks, 1) {
+                        self.gui.tick_text = tick.to_string();
+                        let new_args = ViewerArgs {
+                            tick,
+                            ..self.args.clone()
+                        };
+                        match self.apply_args(new_args) {
+                            Ok(info) => {
+                                let ticks =
+                                    discover_field_ticks(&self.args.output_dir).unwrap_or_default();
+                                self.gui.sync_loaded(&info, &self.args, ticks);
+                            }
+                            Err(e) => {
+                                self.gui
+                                    .set_error(format!("failed to load tick {tick}: {e}"));
+                            }
+                        }
+                    }
+                }
+                GuiAction::ApplyViewSettings => {
+                    let s_ext = self.loaded_info.as_ref().map(|i| i.s_ext);
+                    match self.gui.build_view_args_from_drafts(&self.args, s_ext) {
+                        Ok(new_args) => {
+                            self.gui.set_info("applying view settings…".to_string());
+                            match self.apply_args(new_args) {
+                                Ok(info) => {
+                                    let ticks = discover_field_ticks(&self.args.output_dir)
+                                        .unwrap_or_default();
+                                    self.gui.sync_loaded(&info, &self.args, ticks);
+                                }
+                                Err(e) => {
+                                    self.gui.set_error(format!("apply failed: {e}"));
+                                }
+                            }
+                        }
+                        Err(msg) => {
+                            self.gui.set_error(msg);
+                        }
+                    }
+                }
+                GuiAction::ResetDraftFromLoaded => {
+                    self.gui.reset_drafts_from_args(&self.args);
+                }
+            }
+        }
+
+        // -------------------------------------------------------------------
+        // 3. Acquire surface frame
+        // -------------------------------------------------------------------
         let (frame, should_reconfigure) = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
             wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
@@ -333,6 +543,18 @@ impl Renderer {
                 label: Some("MARL Viewer Render Encoder"),
             });
 
+        // Upload egui vertex/index data before render passes
+        self.egui_renderer.update_buffers(
+            &self.device,
+            &self.queue,
+            &mut encoder,
+            &paint_jobs,
+            &screen_descriptor,
+        );
+
+        // -------------------------------------------------------------------
+        // 4. Raymarch pass (first, with Clear)
+        // -------------------------------------------------------------------
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("MARL Viewer Raymarch Pass"),
@@ -356,17 +578,118 @@ impl Renderer {
                 multiview_mask: None,
             });
             pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, &self.bind_group, &[]);
+            pass.set_bind_group(0, &self.snapshot.bind_group, &[]);
             pass.draw(0..3, 0..1);
         }
 
+        // -------------------------------------------------------------------
+        // 5. Egui pass (second, with Load)
+        // -------------------------------------------------------------------
+        {
+            let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("MARL Viewer Egui Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            // egui_wgpu::Renderer::render expects RenderPass<'static>
+            let mut static_pass = pass.forget_lifetime();
+            self.egui_renderer
+                .render(&mut static_pass, &paint_jobs, &screen_descriptor);
+        }
+
+        // -------------------------------------------------------------------
+        // 6. Submit, present, free textures
+        // -------------------------------------------------------------------
         self.queue.submit(Some(encoder.finish()));
         frame.present();
+
+        for id in &full_output.textures_delta.free {
+            self.egui_renderer.free_texture(id);
+        }
+
         if should_reconfigure {
             RenderResult::Reconfigure
         } else {
             RenderResult::Drawn
         }
+    }
+
+    // -------------------------------------------------------------------
+    // Snapshot reloading
+    // -------------------------------------------------------------------
+
+    /// Try to load a new snapshot from disk and replace current GPU resources
+    /// atomically. On failure, the old snapshot/placeholder is preserved.
+    pub(crate) fn apply_args(
+        &mut self,
+        new_args: ViewerArgs,
+    ) -> Result<SnapshotInfo, Box<dyn Error>> {
+        let (snapshot, info) = try_load_snapshot_resources(
+            &self.device,
+            &self.queue,
+            &self.bind_group_layout,
+            &new_args,
+            self.config.width,
+            self.config.height,
+        )?;
+
+        self.snapshot = snapshot;
+        self.loaded_info = Some(info.clone());
+        self.args = new_args;
+
+        self.window.set_title(&format!(
+            "MARL Viewer - tick {} species {} view {:?} cells {:?} ({} cells, {}x{}x{})",
+            info.tick,
+            info.species,
+            info.view_mode,
+            info.cell_mode,
+            info.cell_count,
+            info.grid[0],
+            info.grid[1],
+            info.grid[2]
+        ));
+
+        Ok(info)
+    }
+
+    /// Load a directory: discover ticks, choose initial tick, load snapshot.
+    pub(crate) fn load_directory_from_gui(&mut self, dir: PathBuf) -> Result<(), Box<dyn Error>> {
+        let ticks = discover_field_ticks(&dir)?;
+        if ticks.is_empty() {
+            return Err(format!("no tick_*.field.bin snapshots found in {}", dir.display()).into());
+        }
+
+        let tick = choose_initial_tick(self.args.tick, &ticks).ok_or("no valid tick found")?;
+
+        // Validate run_meta.json exists and optionally clamp species
+        let mut species = self.args.species;
+        if let Ok(meta) = load_run_meta(&dir) {
+            if species >= meta.s_ext {
+                species = meta.s_ext.saturating_sub(1);
+            }
+        }
+
+        let new_args = ViewerArgs {
+            output_dir: dir,
+            tick,
+            species,
+            ..self.args.clone()
+        };
+
+        let info = self.apply_args(new_args)?;
+        self.gui.sync_loaded(&info, &self.args, ticks);
+        Ok(())
     }
 }
 
@@ -378,6 +701,223 @@ pub(crate) enum RenderResult {
     Drawn,
     Skip,
     Reconfigure,
+}
+
+// ---------------------------------------------------------------------------
+// Snapshot GPU resource construction
+// ---------------------------------------------------------------------------
+
+/// Build `ViewerParams` from a loaded snapshot and viewer args.
+fn build_viewer_params(
+    payload: &SnapshotPayload,
+    args: &ViewerArgs,
+    width: u32,
+    height: u32,
+) -> Result<ViewerParams, Box<dyn Error>> {
+    let cam: CameraBasis = camera_basis(args.view_mode);
+
+    let max_dim = payload
+        .meta
+        .grid_x
+        .max(payload.meta.grid_y)
+        .max(payload.meta.grid_z) as f32;
+    if max_dim <= 0.0 {
+        return Err("zero max grid dimension".into());
+    }
+    let axis_scale = [
+        payload.meta.grid_x as f32 / max_dim,
+        payload.meta.grid_y as f32 / max_dim,
+        payload.meta.grid_z as f32 / max_dim,
+        0.0,
+    ];
+
+    let cells_enabled = if payload.cell_mode == CellMode::Off {
+        0u32
+    } else {
+        1u32
+    };
+
+    Ok(ViewerParams {
+        grid: [
+            payload.meta.grid_x,
+            payload.meta.grid_y,
+            payload.meta.grid_z,
+            payload.meta.s_ext,
+        ],
+        render: [width, height, payload.species, payload.steps],
+        transfer: [
+            payload.exposure,
+            payload.density_scale,
+            payload.cell_alpha,
+            0.0,
+        ],
+        axis_scale,
+        cam_right: [cam.right[0], cam.right[1], cam.right[2], cam.zoom],
+        cam_up: [cam.up[0], cam.up[1], cam.up[2], 0.0],
+        cam_dir: [cam.dir[0], cam.dir[1], cam.dir[2], 0.0],
+        options: [cells_enabled, 0, 0, 0],
+    })
+}
+
+/// Create a bind group using the shared layout and given resources.
+fn create_snapshot_bind_group(
+    device: &wgpu::Device,
+    bind_group_layout: &wgpu::BindGroupLayout,
+    field_view: &wgpu::TextureView,
+    params_buffer: &wgpu::Buffer,
+    cell_view: &wgpu::TextureView,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("MARL Viewer Bind Group"),
+        layout: bind_group_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(field_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: params_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::TextureView(cell_view),
+            },
+        ],
+    })
+}
+
+/// Load snapshot from disk and build all GPU resources.
+/// Returns both the GPU resources and display metadata, or an error.
+fn try_load_snapshot_resources(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    bind_group_layout: &wgpu::BindGroupLayout,
+    args: &ViewerArgs,
+    width: u32,
+    height: u32,
+) -> Result<(SnapshotGpuResources, SnapshotInfo), Box<dyn Error>> {
+    let payload = load_snapshot(args)?;
+
+    let params = build_viewer_params(&payload, args, width, height)?;
+
+    // Field texture
+    let (field_texture, field_view) = create_field_texture(device, queue, &payload)?;
+
+    // Cell texture
+    let cells_enabled = params.options[0] != 0;
+    let (cell_texture, cell_view) = if cells_enabled {
+        let (tex, view) = create_cell_texture(device, queue, &payload, args)?;
+        (tex, view)
+    } else {
+        let (tex, view) = create_empty_cell_texture(device, queue, &payload)?;
+        (tex, view)
+    };
+
+    // Params buffer
+    let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("MARL Viewer Params"),
+        contents: bytemuck::bytes_of(&params),
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+    });
+
+    // Bind group
+    let bind_group = create_snapshot_bind_group(
+        device,
+        bind_group_layout,
+        &field_view,
+        &params_buffer,
+        &cell_view,
+    );
+
+    let info = SnapshotInfo {
+        output_dir: args.output_dir.clone(),
+        tick: payload.tick,
+        species: payload.species,
+        view_mode: args.view_mode,
+        cell_mode: args.cell_mode,
+        cell_count: payload.cells.len(),
+        field_bytes: payload.field_bytes.len(),
+        grid: [
+            payload.meta.grid_x,
+            payload.meta.grid_y,
+            payload.meta.grid_z,
+        ],
+        s_ext: payload.meta.s_ext,
+    };
+
+    Ok((
+        SnapshotGpuResources {
+            bind_group,
+            params_buffer,
+            params,
+            _field_texture: field_texture,
+            _field_view: field_view,
+            _cell_texture: cell_texture,
+            _cell_view: cell_view,
+        },
+        info,
+    ))
+}
+
+// ---------------------------------------------------------------------------
+// Placeholder resources (1×1×1 zero textures)
+// ---------------------------------------------------------------------------
+
+/// Create a minimal 1×1×1 placeholder `SnapshotPayload`.
+fn placeholder_payload(args: &ViewerArgs) -> SnapshotPayload {
+    use marl_format::RunMeta;
+
+    let meta = RunMeta::new(1, 1, 1, 1, 0, true, false);
+    let field_bytes = vec![0u8; 4]; // 1×1×1×1×4 bytes
+    SnapshotPayload {
+        meta,
+        field_bytes,
+        cells: Vec::new(),
+        tick: args.tick,
+        species: 0,
+        exposure: args.exposure,
+        density_scale: args.density_scale,
+        steps: args.steps,
+        cell_mode: CellMode::Off,
+        cell_alpha: args.cell_alpha,
+    }
+}
+
+/// Build SnapshotGpuResources from a placeholder payload.
+fn create_placeholder_resources(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    bind_group_layout: &wgpu::BindGroupLayout,
+    args: &ViewerArgs,
+    width: u32,
+    height: u32,
+) -> Result<SnapshotGpuResources, Box<dyn Error>> {
+    let payload = placeholder_payload(args);
+    let params = build_viewer_params(&payload, args, width, height)?;
+    let (field_texture, field_view) = create_field_texture(device, queue, &payload)?;
+    let (cell_texture, cell_view) = create_empty_cell_texture(device, queue, &payload)?;
+    let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("MARL Viewer Params (placeholder)"),
+        contents: bytemuck::bytes_of(&params),
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+    });
+    let bind_group = create_snapshot_bind_group(
+        device,
+        bind_group_layout,
+        &field_view,
+        &params_buffer,
+        &cell_view,
+    );
+    Ok(SnapshotGpuResources {
+        bind_group,
+        params_buffer,
+        params,
+        _field_texture: field_texture,
+        _field_view: field_view,
+        _cell_texture: cell_texture,
+        _cell_view: cell_view,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -575,8 +1115,6 @@ fn create_empty_cell_texture(
 // ---------------------------------------------------------------------------
 // Cell texture data builder (pure, testable)
 // ---------------------------------------------------------------------------
-
-use crate::io::LoadedCell;
 
 pub(crate) fn build_cell_texture_data(
     gx: usize,
@@ -791,5 +1329,27 @@ mod tests {
         };
         let data = build_cell_texture_data(2, 2, 2, &[cell], CellMode::Off, 200);
         assert!(data.iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn placeholder_payload_dimensions() {
+        let args = ViewerArgs {
+            output_dir: std::path::PathBuf::from("/nonexistent"),
+            tick: 0,
+            species: 1,
+            exposure: 18.0,
+            density_scale: 2.0,
+            steps: 160,
+            view_mode: ViewMode::Iso,
+            cell_mode: CellMode::Starter,
+            cell_alpha: 0.95,
+        };
+        let payload = placeholder_payload(&args);
+        assert_eq!(payload.meta.grid_x, 1);
+        assert_eq!(payload.meta.grid_y, 1);
+        assert_eq!(payload.meta.grid_z, 1);
+        assert_eq!(payload.meta.s_ext, 1);
+        assert_eq!(payload.field_bytes.len(), 4); // 1×1×1×1 × 4 bytes
+        assert!(payload.cells.is_empty());
     }
 }

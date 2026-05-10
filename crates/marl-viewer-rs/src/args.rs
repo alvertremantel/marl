@@ -13,11 +13,38 @@ pub(crate) enum ViewMode {
     Top,
 }
 
+impl ViewMode {
+    pub(crate) fn as_str(&self) -> &'static str {
+        match self {
+            ViewMode::Iso => "iso",
+            ViewMode::Top => "top",
+        }
+    }
+
+    pub(crate) fn all() -> [ViewMode; 2] {
+        [ViewMode::Iso, ViewMode::Top]
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CellMode {
     Off,
     Starter,
     Energy,
+}
+
+impl CellMode {
+    pub(crate) fn as_str(&self) -> &'static str {
+        match self {
+            CellMode::Off => "off",
+            CellMode::Starter => "starter",
+            CellMode::Energy => "energy",
+        }
+    }
+
+    pub(crate) fn all() -> [CellMode; 3] {
+        [CellMode::Off, CellMode::Starter, CellMode::Energy]
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -344,5 +371,35 @@ mod tests {
         assert_ne!(ViewMode::Iso, ViewMode::Top);
         assert_eq!(CellMode::Off, CellMode::Off);
         assert_ne!(CellMode::Starter, CellMode::Energy);
+    }
+
+    #[test]
+    fn view_mode_as_str() {
+        assert_eq!(ViewMode::Iso.as_str(), "iso");
+        assert_eq!(ViewMode::Top.as_str(), "top");
+    }
+
+    #[test]
+    fn cell_mode_as_str() {
+        assert_eq!(CellMode::Off.as_str(), "off");
+        assert_eq!(CellMode::Starter.as_str(), "starter");
+        assert_eq!(CellMode::Energy.as_str(), "energy");
+    }
+
+    #[test]
+    fn view_mode_all_contains_both() {
+        let all = ViewMode::all();
+        assert_eq!(all.len(), 2);
+        assert!(all.contains(&ViewMode::Iso));
+        assert!(all.contains(&ViewMode::Top));
+    }
+
+    #[test]
+    fn cell_mode_all_contains_three() {
+        let all = CellMode::all();
+        assert_eq!(all.len(), 3);
+        assert!(all.contains(&CellMode::Off));
+        assert!(all.contains(&CellMode::Starter));
+        assert!(all.contains(&CellMode::Energy));
     }
 }

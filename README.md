@@ -44,7 +44,7 @@ This repository is a functional prototype, not a polished platform. The core sim
 - `crates/marl-engine/src/data.rs`: CSV logging, reaction registry, end-of-run summary
 - `crates/marl-engine/src/snapshot.rs`: PPM cross-sections and ancestry images
 - `crates/marl-format/`: shared binary metadata and cell-record schema for engine/viewer interop
-- `crates/marl-viewer-rs/`: standalone `wgpu` binary viewer for binary field snapshots
+- `crates/marl-viewer-rs/`: standalone `wgpu` binary viewer with an `egui` GUI shell for directory loading, tick navigation, and view settings
 
 More detail lives in `INFO.md`.
 
@@ -120,13 +120,38 @@ python scripts/check_binary_dump.py output/run_128x128x64 0
 
 ## Standalone Viewer
 
-Phase 1 of the standalone `wgpu` viewer lives in its own workspace crate. It reads `run_meta.json`, uploads a field snapshot as a 3D `R32Float` texture, and raymarches one external species through the volume.
+The standalone `wgpu` viewer lives in its own workspace crate. By default it renders a 3D isometric volume from a binary snapshot with direct cell voxel overlay — occupied voxels are shown as solid markers colored by microbe starter type (phototroph/red, chemolithotroph/green, anaerobe/blue). The extracellular chemical field is shown as a translucent volume behind the cells.
+
+The viewer now includes an `egui` GUI shell that lets you load an output directory, navigate between available snapshot ticks, and adjust view settings interactively:
+
+- **Directory:** text field, `Open…` button (native folder picker), and `Load Dir` button.
+- **Tick navigation:** numeric tick entry, `Go`, `First`/`Prev`/`Next`/`Last` buttons, and `Reload` to rescan the output directory for new snapshots.
+- **View Settings (collapsible side panel):** species, view mode, cell mode, cell alpha, density scale, exposure, and raymarch steps — with `Apply` and `Reset` buttons.
+- The WGSL raymarch renders as a background pass; the `egui` controls overlay on top.
+- On startup with a missing or invalid directory, a 1×1×1 placeholder is shown and the GUI opens so you can load a valid directory.
+
+CLI flags work as before and set the initial state of the GUI:
 
 ```bash
-cargo run -p marl-viewer-rs --release -- output/run_128x128x64 --tick 0 --species 1
+cargo run -p marl-viewer-rs --release -- output/run_128x128x64 --tick 0
 ```
 
-Useful viewer flags: `--species <n>`, `--tick <n>`, `--scale <f>`, `--exposure <f>`, and `--steps <n>`.
+Useful viewer flags:
+- `--tick <n>` — snapshot tick (default: `0`)
+- `--species <n>` — external chemical species to render (default: `1`)
+- `--view <iso|top>` — isometric volume or legacy top-down projection (default: `iso`)
+- `--cells <off|starter|energy>` — cell coloring mode (default: `starter`)
+- `--cell-alpha <f>` — opacity of cell markers, `(0,1]` (default: `0.95`)
+- `--scale <f>` — concentration-to-density scale (default: `2.0`)
+- `--exposure <f>` — opacity multiplier (default: `18.0`)
+- `--steps <n>` — raymarch sample count (default: `160`)
+
+For legacy field-only top-down rendering:
+```bash
+cargo run -p marl-viewer-rs --release -- output/run_128x128x64 --tick 0 --view top --cells off --species 1
+```
+
+**Microbe coloring** uses the `starter_type` field from cell records (ancestry category from the initial seeding), not inferred genotype-level species. Cell rendering requires `write_binary_cells = true` (default) in the engine output config.
 
 ## Status Summary
 

@@ -2,6 +2,65 @@
 
 ## Current Branch: tweak/outputs
 
+## Completed: Viewer GUI Shell (2026-05-09)
+
+The standalone viewer now includes an `egui` GUI shell with directory loading, tick navigation, and view settings controls overlaid on the existing WGSL raymarch renderer.
+
+### What changed
+- `Cargo.toml` / `crates/marl-viewer-rs/Cargo.toml`: added workspace dependencies for `egui`, `egui-wgpu`, `egui-winit`, and `rfd` (native folder picker)
+- `crates/marl-viewer-rs/src/args.rs`: added `ViewMode::as_str()`, `ViewMode::all()`, `CellMode::as_str()`, `CellMode::all()` for GUI labels
+- `crates/marl-viewer-rs/src/io.rs`: extracted `load_run_meta()`, added `discover_field_ticks()` and `parse_field_tick_file_name()` for tick discovery; added tick discovery tests
+- `crates/marl-viewer-rs/src/renderer.rs`: major refactor — extracted `SnapshotGpuResources`, `SnapshotInfo`, `build_viewer_params()`, `create_snapshot_bind_group()`; added placeholder 1×1×1 resources so the window opens even without valid snapshot data; added `apply_args()` for atomic snapshot reload; integrated `egui_ctx`/`egui_state`/`egui_renderer`/`gui`; render loop now includes raymarch pass (LoadOp::Clear) followed by egui overlay pass (LoadOp::Load)
+- `crates/marl-viewer-rs/src/gui.rs` (new): `GuiState`, `GuiAction` enum, tick navigation helpers (`choose_initial_tick`, `neighbor_tick`), GUI drawing with toolbar (directory/tick entry, native folder picker, nav buttons, reload), collapsible side panel (species, view mode, cell mode, cell alpha, density scale, exposure, steps, Apply/Reset), and unit tests
+- `crates/marl-viewer-rs/src/main.rs`: removed hard startup dependency on `load_snapshot()`; viewer binary always opens a window even with invalid/missing output dir
+- `crates/marl-viewer-rs/src/app.rs`: added `handle_window_event()` forwarding for egui input; event loop requests redraw on egui consumption
+- `README.md`: updated viewer section with GUI features, directory picker, tick navigation, and view settings
+
+### Verification
+- `cargo fmt --all`: passes
+- `cargo check -p marl-viewer-rs`: passes (one pre-existing warning about `lineage_id` field)
+- `cargo test -p marl-viewer-rs`: 56 tests pass (args, camera, gui, io, renderer)
+- `cargo test -p marl-format`: 11 tests pass
+- `cargo test -p marl-engine`: 4 tests pass
+- `cargo run -p marl-viewer-rs -- --help`: prints CLI help with all flags preserved
+- `cargo tree -p marl-viewer-rs -i wgpu`: single `wgpu 29.x`
+- `cargo tree -p marl-viewer-rs -i winit`: single `winit 0.30.x`
+- Manual visual verification pending on a display/GPU-capable machine
+
+### Notes
+- `egui-winit`/`egui-wgpu` were chosen over `eframe`; the WGSL raymarch remains the background pass
+- Snapshot GPU resources are built atomically and replaced only on success; placeholder 1×1×1 resources are used when no valid data is loaded
+- The native directory picker (`rfd`) is available via the "Open…" button; a text field fallback is always available
+- View settings apply triggers a full snapshot reload (acceptable for MVP); CLI flags still work and set initial GUI draft values
+
+## Completed: Enhanced 3D Viewer with Microbe Voxels (2026-05-09)
+
+The standalone viewer now renders an isometric 3D volume by default, with direct microbe-occupied voxel markers overlaid on the translucent chemical field. Cell records are loaded from `tick_<T>.cells.bin` and uploaded as an `Rgba8Uint` 3D occupancy/identity texture.
+
+### What changed
+- `crates/marl-viewer-rs/src/args.rs`: added `--view <iso|top>`, `--cells <off|starter|energy>`, `--cell-alpha <f>` flags; refactored parser for testability; new defaults are `iso`/`starter`/`0.95`
+- `crates/marl-viewer-rs/src/io.rs`: renamed `FieldPayload` to `SnapshotPayload`; added `LoadedCell` type and cell `.bin` parsing with position validation
+- `crates/marl-viewer-rs/src/camera.rs` (new): `CameraBasis`, `camera_basis(ViewMode)` helpers for isometric and top-down orthographic cameras
+- `crates/marl-viewer-rs/src/renderer.rs`: expanded `ViewerParams` with camera and cell uniforms; added `Rgba8Uint` 3D cell texture creation with starter/energy coloring; updated bind group to include cell texture (binding 2)
+- `crates/marl-viewer-rs/src/viewer_raymarch.wgsl`: replaced top-down z-stepping with orthographic ray/AABB traversal; cell voxel compositing with per-voxel deduplication; effective step count to avoid skipping one-voxel markers
+- `crates/marl-viewer-rs/src/main.rs`, `app.rs`: wired `SnapshotPayload` and `ViewerArgs` through load/launch flow; enhanced load messaging and window title
+- `README.md`: updated viewer section with isometric defaults, cell rendering flags, and microbe coloring notes
+
+### Verification
+- `cargo fmt --all`: passes
+- `cargo check -p marl-viewer-rs`: passes (one expected warning about `lineage_id` field)
+- `cargo test -p marl-viewer-rs`: 35 tests pass (args, camera, io, renderer)
+- `cargo test -p marl-format`: passes
+- `cargo test -p marl-engine`: passes
+- `cargo run -p marl-viewer-rs -- --help`: prints updated help with new flags
+- Manual visual verification pending on a display/GPU-capable machine
+
+### Notes
+- Microbe coloring uses `starter_type` (ancestry category from seeding), not inferred genotype-level species
+- Cell occupancy is uploaded as `Rgba8Uint` 3D texture; unoccupied voxels remain transparent
+- Isometric camera is a fixed orthographic oblique view; no interactive orbit controls yet
+- Legacy `--view top --cells off` is preserved for field-only rendering
+
 ## Completed: Workspace Crate Decomposition (2026-04-25)
 
 The repository is now a Cargo workspace with separate engine, viewer, and shared binary format crates. The root directory is no longer a Rust package, leaving room for project-level files and a future Python/uv component without scaffolding one now.
@@ -50,10 +109,11 @@ The repository now has a separate, feature-gated `marl-viewer` binary that inges
 - `cargo test`: passes
 - `cargo run --features viewer --bin marl-viewer -- --help`: prints CLI help
 
-### Immediate next steps
-- Add the planned two-snapshot streaming/interpolation pipeline.
-- Add cell buffer ingestion/instanced rendering.
+### Immediate next steps (superseded by Enhanced 3D Viewer, 2026-05-09)
+- ~~Add cell buffer ingestion/instanced rendering.~~ → Done: cell occupancy/identity texture with starter/energy coloring.
+- Add two-snapshot streaming/interpolation pipeline.
 - Add camera/ray/AABB picking for exact voxel queries.
+- Add interactive orbit controls.
 
 ## Completed: Engine Viewer Data Pipeline (2026-04-25)
 

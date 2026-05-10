@@ -40,15 +40,20 @@ pub(crate) struct SnapshotPayload {
 // Snapshot loading
 // ---------------------------------------------------------------------------
 
-pub(crate) fn load_snapshot(args: &ViewerArgs) -> Result<SnapshotPayload, Box<dyn Error>> {
-    // --- run_meta.json ---
-    let meta_path = args.output_dir.join("run_meta.json");
+/// Load and validate `run_meta.json` from an output directory.
+pub(crate) fn load_run_meta(output_dir: &std::path::Path) -> Result<RunMeta, Box<dyn Error>> {
+    let meta_path = output_dir.join("run_meta.json");
     let meta_bytes =
         fs::read(&meta_path).map_err(|e| format!("failed to read {}: {e}", meta_path.display()))?;
     let meta: RunMeta = serde_json::from_slice(&meta_bytes)
         .map_err(|e| format!("failed to parse {}: {e}", meta_path.display()))?;
     meta.validate()
         .map_err(|e| format!("invalid run_meta.json: {e}"))?;
+    Ok(meta)
+}
+
+pub(crate) fn load_snapshot(args: &ViewerArgs) -> Result<SnapshotPayload, Box<dyn Error>> {
+    let meta = load_run_meta(&args.output_dir)?;
 
     if args.species >= meta.s_ext {
         return Err(format!(
@@ -93,6 +98,58 @@ pub(crate) fn load_snapshot(args: &ViewerArgs) -> Result<SnapshotPayload, Box<dy
         cell_mode: args.cell_mode,
         cell_alpha: args.cell_alpha,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Tick discovery
+// ---------------------------------------------------------------------------
+
+/// Discover available snapshot ticks in an output directory.
+///
+/// Scans for files matching `tick_<digits>.field.bin`, parses the tick
+/// number, sorts ascending, and deduplicates. Returns an empty `Vec` if
+/// the directory is readable but contains no matching files.
+pub(crate) fn discover_field_ticks(
+    output_dir: &std::path::Path,
+) -> Result<Vec<u64>, Box<dyn Error>> {
+    let entries = fs::read_dir(output_dir)
+        .map_err(|e| format!("failed to read directory {}: {e}", output_dir.display()))?;
+
+    let mut ticks: Vec<u64> = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|e| {
+            Box::<dyn Error>::from(format!(
+                "failed to read entry in {}: {e}",
+                output_dir.display()
+            ))
+        })?;
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        if let Some(tick) = parse_field_tick_file_name(&name_str) {
+            ticks.push(tick);
+        }
+    }
+
+    ticks.sort_unstable();
+    ticks.dedup();
+    Ok(ticks)
+}
+
+/// Parse a tick number from a filename like `tick_42.field.bin`.
+///
+/// Returns `Some(tick)` if the name starts with `tick_`, ends with
+/// `.field.bin`, and the middle portion is a valid `u64`.
+fn parse_field_tick_file_name(name: &str) -> Option<u64> {
+    let without_prefix = name.strip_prefix("tick_")?;
+    let digits = without_prefix.strip_suffix(".field.bin")?;
+    // Reject empty digit string or strings with non-digit characters
+    if digits.is_empty() {
+        return None;
+    }
+    if !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    digits.parse::<u64>().ok()
 }
 
 // ---------------------------------------------------------------------------
@@ -297,6 +354,72 @@ mod tests {
         let meta = test_meta();
         let err = parse_one_cell_record(&record, 0, &PathBuf::from("nan.bin"), &meta).unwrap_err();
         assert!(err.to_string().contains("energy"));
+    }
+
+    // --- Tick discovery tests ---
+
+    #[test]
+    fn parse_field_tick_file_name_valid() {
+        assert_eq!(parse_field_tick_file_name("tick_0.field.bin"), Some(0));
+        assert_eq!(parse_field_tick_file_name("tick_42.field.bin"), Some(42));
+        assert_eq!(
+            parse_field_tick_file_name("tick_18446744073709551615.field.bin"),
+            Some(18446744073709551615)
+        ); // u64::MAX
+    }
+
+    #[test]
+    fn parse_field_tick_file_name_invalid() {
+        assert_eq!(parse_field_tick_file_name("tick_.field.bin"), None);
+        assert_eq!(parse_field_tick_file_name("field.bin"), None);
+        assert_eq!(parse_field_tick_file_name("tick_0"), None);
+        assert_eq!(parse_field_tick_file_name("tick_abc.field.bin"), None);
+        assert_eq!(parse_field_tick_file_name("tick_1.cells.bin"), None);
+        assert_eq!(parse_field_tick_file_name("tick_-1.field.bin"), None);
+        assert_eq!(parse_field_tick_file_name("extra_tick_1.field.bin"), None);
+        assert_eq!(parse_field_tick_file_name(""), None);
+    }
+
+    #[test]
+    fn discover_field_ticks_sorts_dedups() {
+        // Use a directory under /tmp/opencode for testing
+        let dir = std::path::Path::new("/tmp/opencode/io_test_discover");
+        let _ = fs::remove_dir_all(dir);
+        fs::create_dir_all(dir).unwrap();
+        // Create files in non-sorted order with duplicate tick
+        for name in &[
+            "tick_100.field.bin",
+            "tick_3.field.bin",
+            "tick_42.field.bin",
+            "tick_3.field.bin", // duplicate — overwrites, same tick
+        ] {
+            fs::write(dir.join(name), b"data").unwrap();
+        }
+        // Also create some non-matching files
+        fs::write(dir.join("tick_1.cells.bin"), b"data").unwrap();
+        fs::write(dir.join("run_meta.json"), b"{}").unwrap();
+
+        let ticks = discover_field_ticks(dir).unwrap();
+        assert_eq!(ticks, vec![3, 42, 100]);
+
+        // Cleanup
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn discover_field_ticks_empty_dir() {
+        let dir = std::path::Path::new("/tmp/opencode/io_test_empty");
+        let _ = fs::remove_dir_all(dir);
+        fs::create_dir_all(dir).unwrap();
+        let ticks = discover_field_ticks(dir).unwrap();
+        assert!(ticks.is_empty());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn discover_field_ticks_unreadable_dir() {
+        let result = discover_field_ticks(std::path::Path::new("/nonexistent/path/12345"));
+        assert!(result.is_err());
     }
 
     /// Helper: parse cells from in-memory bytes for testing.

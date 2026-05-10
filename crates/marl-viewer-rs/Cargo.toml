@@ -10,7 +10,11 @@ path = "src/main.rs"
 [dependencies]
 marl-format = { path = "../marl-format" }
 bytemuck.workspace = true
+egui.workspace = true
+egui-wgpu.workspace = true
+egui-winit.workspace = true
 pollster.workspace = true
+rfd.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 wgpu.workspace = true

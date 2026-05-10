@@ -107,3 +107,66 @@
 ### Benchmark observation
 
 - On NVIDIA GeForce RTX 4060 via Vulkan, a 10-tick release run showed about 5.2s CPU vs about 1.2s GPU with upload/readback every tick. Treat this as coarse only; the simulation seed is random and no fine-grained upload/dispatch/readback timings are recorded yet.
+
+## Enhanced 3D Viewer with Microbe Voxels (2026-05-09)
+
+### Durable decisions
+
+1. **`starter_type` is the MVP microbe identity indicator.**
+   The viewer colors occupied voxels by `starter_type` (0 = phototroph, 1 = chemolithotroph, 2 = anaerobe, other = magenta). This is an ancestry marker from the initial seeding, not an inferred genotype-level species. True species classification from reaction topologies would require an engine schema extension.
+
+2. **Cell occupancy is uploaded as `Rgba8Uint` 3D texture.**
+   The viewer converts sparse `LoadedCell` records into a dense texture sized `(grid_x, grid_y, grid_z)`. Each occupied voxel stores RGBA bytes encoding the marker color and alpha. Unoccupied voxels are zeroed. For the default `128x128x64` grid this texture is approximately 4 MiB.
+
+3. **The isometric camera uses orthographic ray/AABB traversal.**
+   The camera basis (`right`, `up`, `dir`, `zoom`) is computed in pure Rust (`camera.rs`) and passed to the shader as uniforms. The fragment shader constructs an orthographic ray per pixel, intersects it with the normalized simulation box, and marches through the volume. This replaces the old screen-`uv`→`z` mapping.
+
+4. **Cell voxels are composited once per voxel crossing during raymarch.**
+   The shader tracks the previous voxel coordinate and only applies cell color/alpha when the current step enters a new voxel. This prevents the same occupied voxel from contributing multiple times.
+
+5. **A conservative effective step count ensures one-voxel markers are not skipped.**
+   The shader uses `max(user_steps, 2 * max(grid_x, grid_y, grid_z))` for the isometric view so a single occupied voxel in the `128x128x64` grid cannot be missed by insufficient ray sampling. User-provided `--steps` can still increase this.
+
+6. **Legacy top-down/field-only rendering is preserved.**
+   `--view top --cells off` restores the Phase 1 behavior of top-down z-stepping through one chemical species without cell overlay. This keeps backward compatibility for existing field-only analysis workflows.
+
+### Gotchas
+
+1. **`Rgba8Uint` texture `bytes_per_row` alignment.**
+   For grids where `grid_x * 4` is not a multiple of the adapter's `COPY_BYTES_PER_ROW_ALIGNMENT` (typically 256), `queue.write_texture` requires padding or will fail at runtime. At the default `128x128`, `128 * 4 = 512` which is a multiple of 256, so this is not an issue for the current default but may matter for larger or non-power-of-2 grids.
+
+2. **Duplicate cell positions are silently resolved.**
+   The engine should never produce duplicate positions, but if it does, the viewer keeps the first cell in `starter` mode and the first cell in `energy` mode (with a warning). This avoids silently showing wrong data.
+
+3. **Shader compilation is runtime-only.**
+    `cargo check` passes regardless of WGSL syntax validity. CPU-side tests cannot catch shader errors. A display/GPU-capable smoke test is required to confirm the shader pipeline creates successfully.
+
+## Viewer GUI Shell (2026-05-09)
+
+### Durable decisions
+
+1. **`egui-winit`/`egui-wgpu` were chosen over `eframe`.**
+   `eframe` would own the event loop, device, and surface, forcing a larger rewrite or custom paint callback. Direct egui integration lets the existing WGSL raymarch remain the first/background render pass on the same wgpu surface, followed by an egui overlay pass for controls. The raymarch pass uses `LoadOp::Clear`; the egui pass uses `LoadOp::Load`.
+
+2. **Snapshot GPU resources are reloadable.**
+   The renderer owns a `SnapshotGpuResources` struct (textures, params buffer, bind group) that can be atomically replaced. When a new directory or tick is loaded, new GPU resources are built into locals first; only after all steps succeed do they replace the active resources. On failure, the old snapshot or placeholder remains visible.
+
+3. **Placeholder resources enable window-open-without-valid-data.**
+   When the initial or default output directory is missing or invalid, the renderer creates 1×1×1 all-zero field/cell textures and a valid bind group. This lets the GUI open and display controls so the user can navigate to a valid directory. The window title reports "no snapshot loaded" in this state.
+
+4. **Tick discovery scans the output directory for `tick_<T>.field.bin` files.**
+   `discover_field_ticks()` reads the directory, parses filenames matching `tick_<digits>.field.bin`, sorts ascending, and deduplicates. Navigation uses `neighbor_tick()` on the sorted list so snapshot intervals larger than one work. Tick lists are rescanned on each successful load so new ticks written by a running simulation appear after `Reload`.
+
+5. **View settings apply triggers a full snapshot reload.**
+   For MVP simplicity, changing species, view mode, cell mode, or rendering parameters reloads the snapshot from disk rather than updating GPU uniforms only. The `Apply` button triggers an explicit reload; sliders/drags do not live-update.
+
+6. **Native directory picker (`rfd`) with text field fallback.**
+   The `Open…` button calls `rfd::FileDialog::pick_folder()`. On platforms where this returns `None`, the text field + `Load Dir` button remain functional.
+
+### Gotchas
+
+1. **`forget_lifetime()` is required for the egui render pass.**
+   `egui_wgpu::Renderer::render()` expects `RenderPass<'static>`. The raymarch pass captures `&view` and the encoder borrows `&self.device` — this prevents moving the renderer. Using `pass.forget_lifetime()` in a block that ends before `encoder.finish()` works because `encoder` and the underlying command buffer keep the textures alive.
+
+2. **Deprecated egui panel API in 0.34.2.**
+   `egui::TopBottomPanel`, `egui::SidePanel`, and `.show()` are deprecated in 0.34.2. The code uses `#[allow(deprecated)]` to suppress warnings since the root-level panel API requires `show_inside()` which needs a `&mut Ui`, nesting everything inside `CentralPanel::show()` which is itself deprecated. A future egui update will migrate to the new API.

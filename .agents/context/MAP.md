@@ -24,11 +24,13 @@
 
 ## Standalone Viewer
 - `crates/marl-viewer-rs/src/main.rs`: thin viewer binary entrypoint
-- `crates/marl-viewer-rs/src/args.rs`: viewer CLI parsing
-- `crates/marl-viewer-rs/src/io.rs`: `run_meta.json` and field snapshot loading
-- `crates/marl-viewer-rs/src/renderer.rs`: `wgpu` renderer and 3D texture upload
-- `crates/marl-viewer-rs/src/app.rs`: `winit` application/event loop handling
-- `crates/marl-viewer-rs/src/viewer_raymarch.wgsl`: full-screen raymarch shader for a selected external species in the packed 3D field texture
+- `crates/marl-viewer-rs/src/args.rs`: viewer CLI parsing with isometric/cell mode flags and GUI label helpers
+- `crates/marl-viewer-rs/src/io.rs`: `run_meta.json`, field snapshot, cell record loading, and tick discovery
+- `crates/marl-viewer-rs/src/camera.rs`: deterministic orthographic camera basis for iso/top views
+- `crates/marl-viewer-rs/src/renderer.rs`: `wgpu` renderer with reloadable snapshot resources, 3D field/cell texture upload, egui overlay pass, and action processing
+- `crates/marl-viewer-rs/src/gui.rs`: `egui` GUI state, action enum, toolbar/sidebar layout, tick navigation helpers, view settings controls, and unit tests
+- `crates/marl-viewer-rs/src/app.rs`: `winit` application/event loop handling with egui event forwarding
+- `crates/marl-viewer-rs/src/viewer_raymarch.wgsl`: full-screen raymarch shader with isometric ray/AABB traversal, chemical field sampling, and cell voxel compositing
 
 ## GPU Prototype
 - `crates/marl-engine/src/gpu/`: optional `gpu` feature implementation for field diffusion

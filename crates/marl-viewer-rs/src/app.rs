@@ -7,19 +7,16 @@ use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::{Window, WindowId};
 
 use crate::args::ViewerArgs;
-use crate::io::SnapshotPayload;
 use crate::renderer::{RenderResult, Renderer};
 
 pub(crate) struct ViewerApp {
-    payload: Option<SnapshotPayload>,
     args: Option<ViewerArgs>,
     renderer: Option<Renderer>,
 }
 
 impl ViewerApp {
-    pub(crate) fn new(payload: SnapshotPayload, args: ViewerArgs) -> Self {
+    pub(crate) fn new(args: ViewerArgs) -> Self {
         Self {
-            payload: Some(payload),
             args: Some(args),
             renderer: None,
         }
@@ -37,10 +34,6 @@ impl ApplicationHandler for ViewerApp {
         if self.renderer.is_some() {
             return;
         }
-        let Some(payload) = self.payload.take() else {
-            event_loop.exit();
-            return;
-        };
         let Some(args) = self.args.take() else {
             event_loop.exit();
             return;
@@ -58,7 +51,7 @@ impl ApplicationHandler for ViewerApp {
             }
         };
 
-        match pollster::block_on(Renderer::new(window, payload, args)) {
+        match pollster::block_on(Renderer::new(window, args)) {
             Ok(renderer) => self.renderer = Some(renderer),
             Err(e) => {
                 eprintln!("failed to initialize viewer renderer: {e}");
@@ -80,6 +73,9 @@ impl ApplicationHandler for ViewerApp {
             return;
         }
 
+        // Let egui process the event first
+        let egui_consumed = renderer.handle_window_event(&event);
+
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => renderer.resize(size),
@@ -88,7 +84,12 @@ impl ApplicationHandler for ViewerApp {
                 RenderResult::Drawn | RenderResult::Skip => {}
                 RenderResult::Reconfigure => renderer.resize(renderer.window.inner_size()),
             },
-            _ => {}
+            _ => {
+                // If egui consumed the event (e.g. keyboard input), request a redraw
+                if egui_consumed {
+                    renderer.window.request_redraw();
+                }
+            }
         }
     }
 
