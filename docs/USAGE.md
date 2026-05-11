@@ -1,0 +1,474 @@
+# MARL Usage Guide
+
+This document covers everything you need to build, configure, run, and inspect
+the MARL simulation and its standalone viewer.
+
+---
+
+## Prerequisites
+
+- **Rust toolchain** (stable, 1.85+). Install via [rustup](https://rustup.rs):
+  ```bash
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+  ```
+- **Python 3.8+** (optional) — for the binary output validation script.
+- **A GPU with Vulkan, Metal, or DX12 support** (optional) — for the `wgpu`
+  viewer and the optional GPU diffusion path. Both work on CPU-only machines;
+  the viewer will use a software adapter if available (`Vulkan` → `llvmpipe`).
+
+## Building
+
+### Full workspace (release)
+
+```bash
+cargo build --release --workspace
+```
+
+This builds both the `marl-engine` and `marl-viewer-rs` binaries under
+`target/release/`.
+
+### Engine only
+
+```bash
+cargo build -p marl-engine --release
+```
+
+To include the **experimental GPU diffusion** path:
+
+```bash
+cargo build -p marl-engine --release --features gpu
+```
+
+This compiles optional GPU compute shaders for field diffusion. The GPU path is
+activated at runtime with `--gpu-diffusion`, not at compile time. Without the
+flag, the engine always uses the CPU solver even when compiled with `--features
+gpu`.
+
+### Viewer only
+
+```bash
+cargo build -p marl-viewer-rs --release
+```
+
+### Running without building first
+
+Cargo will build automatically if you use `cargo run`:
+
+```bash
+cargo run -p marl-engine --release -- --ticks 100 --stats 10
+cargo run -p marl-viewer-rs --release -- output/run_128x128x64 --tick 0
+```
+
+---
+
+## Running the Engine
+
+### Quick start
+
+```bash
+cargo run -p marl-engine --release -- --ticks 5000 --stats 100 --snapshot 500 --images 500
+```
+
+This runs 5000 ticks with the default `128×128×64` grid and three seeded
+microbial metabolisms. Stats print to stdout every 100 ticks, snapshots write
+every 500 ticks, and PPM images (if enabled in TOML) write every 500 ticks.
+
+### CLI flags
+
+All run-control parameters can be set on the command line. These override both
+built-in defaults and any TOML config file:
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--config <path>` | Path to TOML config file | `marl.toml` (CWD) |
+| `--ticks <n>` | Total simulation ticks | 5000 |
+| `--stats <n>` | Stdout stats interval (ticks) | 100 |
+| `--snapshot <n>` | Binary (and optional CSV) snapshot interval | 500 |
+| `--images <n>` | PPM image snapshot interval | 500 |
+| `--seed <n>` | Cells to seed per starter metabolism | 30 |
+| `--output <dir>` | Output directory | `output/run_128x128x64` |
+| `--gpu-diffusion` | Use GPU diffusion (requires `--features gpu` at build time) | off |
+
+### Grid dimensions
+
+Grid dimensions (`GRID_X`, `GRID_Y`, `GRID_Z`) and species counts (`S_EXT`,
+`M_INT`) are **compile-time constants** in
+`crates/marl-engine/src/config.rs`. To change grid size, edit those constants
+and recompile:
+
+```rust
+// crates/marl-engine/src/config.rs
+pub const GRID_X: usize = 64;
+pub const GRID_Y: usize = 64;
+pub const GRID_Z: usize = 32;
+```
+
+Suggested sizes:
+- `64×64×32` — quick debug runs (~7 ticks/s)
+- `128×128×64` — calibration runs (default)
+- `256×256×128` — production runs (needs more than one thread; ~0.1 ticks/s estimated)
+
+---
+
+## Runtime Configuration (TOML)
+
+All physics, chemistry, biology, and output parameters are configurable via an
+optional TOML file. A sample `marl.toml` with all defaults is included in the
+repository root.
+
+### Loading a custom config
+
+```bash
+cargo run -p marl-engine --release -- --config myrun.toml
+```
+
+Copy `marl.toml` to a new name, edit values, and run with `--config`. Missing
+keys fall back to built-in defaults, so partial TOML files work — specify only
+what you want to change.
+
+### Configuration hierarchy
+
+1. **Built-in defaults** (hardcoded in `config.rs`)
+2. **TOML file** (overrides defaults for any keys present)
+3. **CLI flags** (override run-control fields: `--ticks`, `--stats`, etc.)
+
+### `[simulation]` section
+
+Core physics and biology parameters:
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `dx` | f32 | 0.0001 | Voxel size (100 µm) |
+| `dt` | f32 | 1.0 | Ticks per day |
+| `diffusion_substeps` | usize | 10 | Diffusion sub-steps per tick |
+| `d_voxel` | [f32; 12] | [0, 1.5, 1.0, …] | Diffusion coefficients per species |
+| `lambda_decay` | [f32; 12] | [0, 0.01, …] | Decay rates per species (fraction/tick) |
+| `source_rate_oxidant` | f32 | 0.4 | Oxidant boundary source rate |
+| `source_rate_carbon` | f32 | 0.15 | Carbon boundary source rate |
+| `source_rate_reductant` | f32 | 0.5 | Reductant boundary source rate |
+| `epsilon` | f32 | 0.001 | Small background reaction rate |
+| `c_max` | f32 | 10.0 | Saturation ceiling for transporter kinetics |
+| `lambda_maintenance` | f32 | 0.12 | Base maintenance cost per tick |
+| `hard_death_floor` | f32 | 0.01 | Energy below which cells die regardless of evolved threshold |
+| `reaction_maintenance` | f32 | 0.003 | Per-active-reaction cost per tick |
+| `base_division_prep` | f32 | 20.0 | Tick count for full division prep |
+| `prep_maintenance_multiplier` | f32 | 2.0 | Maintenance multiplier during division prep |
+| `rush_penalty_rate` | f32 | 0.05 | Penalty for evolving shorter division prep |
+| `alpha_eps` | f32 | 0.8 | Niche construction deposit efficiency |
+| `k_eps` | f32 | 2.0 | Niche construction saturation constant |
+| `light_efficiency` | f32 | 0.0 | Light-to-catalysis efficiency |
+| `surface_intensity` | f32 | 1.0 | Light intensity at the top surface |
+| `cell_absorption` | f32 | 0.3 | Light attenuation per occupied voxel |
+| `chemical_absorption` | f32 | 0.05 | Light attenuation per organic waste unit |
+| `light_floor` | f32 | 1e-7 | Minimum light value (prevents zero) |
+
+**Mutation parameters:**
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `mutation_stddev` | f32 | 0.1 | Standard deviation of parametric perturbation |
+| `structural_mutation_rate_mult` | f32 | 0.1 | Multiplier on rare structural rewiring rate |
+| `meta_mutation_rate` | f32 | 0.01 | Rate at which mutation rate itself mutates |
+| `meta_mutation_clamp_low` | f32 | 0.001 | Minimum evolvable mutation rate |
+| `meta_mutation_clamp_high` | f32 | 0.5 | Maximum evolvable mutation rate |
+| `hill_exponent_clamp_low` | f32 | 0.5 | Minimum evolvable Hill coefficient |
+| `hill_exponent_clamp_high` | f32 | 8.0 | Maximum evolvable Hill coefficient |
+| `active_reaction_threshold` | f32 | 1e-9 | Flux threshold below which a reaction slot counts as inactive |
+
+**Seeding geometry:**
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `seed_margin` | u16 | 5 | Minimum distance (voxels) from domain edges |
+| `phototroph_z_lo` | f32 | 0.0 | Phototroph seeding band lower bound |
+| `phototroph_z_hi` | f32 | 3.0 | Phototroph seeding band upper bound |
+| `chemolithotroph_z_lo` | f32 | 80.0 | Chemolithotroph seeding band lower bound |
+| `chemolithotroph_z_hi` | f32 | 130.0 | Chemolithotroph seeding band upper bound |
+| `anaerobe_z_lo` | f32 | 120.0 | Anaerobe seeding band lower bound |
+| `anaerobe_z_hi` | f32 | 180.0 | Anaerobe seeding band upper bound |
+| `division_neighbor_distance` | u8 | 2 | Search radius for empty voxels during division |
+
+**Boundary priming:**
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `boundary_prime_layers` | usize | 2 | Number of z-layers to prime at boundaries |
+| `boundary_prime_oxidant` | f32 | 0.5 | Initial oxidant concentration in primed layers |
+| `boundary_prime_carbon` | f32 | 0.3 | Initial carbon concentration in primed layers |
+| `boundary_prime_reductant` | f32 | 0.5 | Initial reductant concentration in primed layers |
+
+### `[output]` section
+
+Output cadence, directories, and format toggles:
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `max_ticks` | u32 | 5000 | Total ticks to simulate |
+| `stats_interval` | u32 | 100 | Ticks between stdout stats lines |
+| `snapshot_interval` | u32 | 500 | Ticks between binary field/cell dumps |
+| `image_interval` | u32 | 500 | Ticks between PPM image dumps |
+| `seed_count` | usize | 30 | Initial cells per starter metabolism |
+| `output_dir` | string | `"output/run_128x128x64"` | Output root directory |
+| `write_binary_field` | bool | true | Write `tick_<T>.field.bin` |
+| `write_binary_cells` | bool | true | Write `tick_<T>.cells.bin` |
+| `write_tick_log` | bool | false | Write `ticks.csv` |
+| `write_csv_snapshots` | bool | false | Write per-tick CSV snapshots |
+| `xz_snapshot_species` | [usize] | [] | Species indices for XZ cross-section PPMs |
+| `xy_slice_depths_frac` | [f32] | [] | Fractional depths for XY slice PPMs |
+| `write_ancestry_map` | bool | false | Write ancestry-colored XZ PPMs |
+| `write_density_map` | bool | false | Write cell density PPMs |
+
+---
+
+## Output Files
+
+Runs write into `output_dir` (default: `output/run_128x128x64`).
+
+### Always produced
+
+| File | Format | Description |
+|------|--------|-------------|
+| `run_meta.json` | JSON | Grid dimensions, species counts, binary byte layouts, snapshot interval |
+| `tick_<T>.field.bin` | raw f32 LE | Full extracellular field in `[z][y][x][species]` order |
+| `tick_<T>.cells.bin` | packed binary | Sparse cell records (pos, lineage_id, starter_type, energy) |
+| `summary.md` | Markdown | End-of-run population, chemistry, and configuration summary |
+
+### Opt-in via `marl.toml`
+
+| File | Requires | Description |
+|------|----------|-------------|
+| `ticks.csv` | `write_tick_log = true` | Per-tick population and z-layer counts |
+| `chem_<tick>.csv` | `write_csv_snapshots = true` | Full field dump as CSV |
+| `cells_<tick>.csv` | `write_csv_snapshots = true` | All cell states as CSV |
+| `reactions_<tick>.csv` | `write_csv_snapshots = true` | All active reactions as CSV |
+| `reaction_registry.csv` | `write_csv_snapshots = true` | Stable reaction topology IDs across the run |
+| `*.ppm` | Various toggles | XZ cross-sections, XY slices, density maps, ancestry maps |
+
+### Validating binary output
+
+```bash
+python scripts/check_binary_dump.py output/run_128x128x64 0
+```
+
+See [`docs/SCRIPTS.md`](SCRIPTS.md) for details.
+
+---
+
+## Running the Viewer
+
+The standalone viewer renders 3D isometric volumes with direct cell voxel
+overlay, or legacy top-down field-only projections.
+
+### Quick start
+
+```bash
+cargo run -p marl-viewer-rs --release -- output/run_128x128x64 --tick 0
+```
+
+### CLI flags
+
+| Flag | Values | Default | Description |
+|------|--------|---------|-------------|
+| `--dir <path>` | path | (positional) | Output directory containing `run_meta.json` |
+| `--tick <n>` | integer | 0 | Snapshot tick to load |
+| `--species <n>` | integer | 1 | External chemical species to render |
+| `--view <mode>` | `iso`, `top` | `iso` | Isometric volume or top-down projection |
+| `--cells <mode>` | `off`, `starter`, `energy` | `starter` | Cell coloring mode |
+| `--cell-alpha <f>` | (0, 1] | 0.95 | Opacity of cell voxel markers |
+| `--scale <f>` | float | 2.0 | Concentration-to-density transfer function scale |
+| `--exposure <f>` | float | 18.0 | Raymarch opacity multiplier |
+| `--steps <n>` | integer | 160 | Raymarch sample count |
+
+### Microbe coloring
+
+Cell rendering uses the `starter_type` field from cell records — an ancestry
+category from the initial seeding, **not** an inferred genotype-level species:
+
+- **Red** — phototroph
+- **Green** — chemolithotroph
+- **Blue** — anaerobe
+- **Magenta** — other/unknown
+
+Cell rendering requires `write_binary_cells = true` in the engine output config
+(enabled by default).
+
+### Legacy top-down field-only rendering
+
+```bash
+cargo run -p marl-viewer-rs --release -- output/run_128x128x64 --tick 0 --view top --cells off --species 1
+```
+
+This renders a single chemical species as a top-down z-projection without cell
+markers, matching the pre-isometric viewer behavior.
+
+---
+
+## Viewer GUI
+
+The viewer includes an `egui` GUI shell overlaid on the 3D render. It opens
+automatically — no extra flags needed.
+
+### Controls
+
+**Directory toolbar (top):**
+- Text field — enter or edit the output directory path.
+- `Open…` — native folder picker dialog (platform-dependent; falls back
+  gracefully if unavailable).
+- `Load Dir` — loads the entered directory, discovers available snapshot ticks,
+  and opens the first available tick.
+- `Reload` — rescans the current directory for new ticks (useful when a
+  simulation is still running and writing new snapshots).
+
+**Tick navigation:**
+- Numeric tick entry + `Go` button.
+- `First` / `Prev` / `Next` / `Last` buttons for stepping through available
+  snapshot ticks.
+
+**View Settings (collapsible side panel):**
+- **Species** — which extracellular chemical species to render.
+- **View mode** — isometric or top-down.
+- **Cell mode** — off, starter-colored, or energy-colored.
+- **Cell alpha** — opacity of cell voxel markers.
+- **Density scale** — concentration-to-density mapping.
+- **Exposure** — opacity multiplier for the raymarch.
+- **Raymarch steps** — number of samples along each ray.
+- `Apply` — reloads the snapshot with current settings.
+- `Reset` — returns all settings to their defaults.
+
+Changes are not live; click `Apply` to reload the snapshot with the new
+settings.
+
+### Startup behavior
+
+If the viewer is launched with a missing or invalid output directory, it opens
+a window with a 1×1×1 placeholder render and shows the GUI so you can navigate
+to a valid directory. The window title will show "no snapshot loaded" in this
+state.
+
+---
+
+## Common Workflows
+
+### Parameter sweep
+
+1. Copy `marl.toml`:
+   ```bash
+   cp marl.toml sweep_mutation.toml
+   ```
+2. Edit one value (e.g., `mutation_stddev = 0.05`).
+3. Run with a distinct output directory:
+   ```bash
+   cargo run -p marl-engine --release -- --config sweep_mutation.toml --output output/sweep_mut_0.05
+   ```
+
+Repeat for different values. The `summary.md` in each output directory
+records the final state.
+
+### Running and viewing simultaneously
+
+1. Start the engine in one terminal:
+   ```bash
+   cargo run -p marl-engine --release -- --ticks 5000 --snapshot 500 --output output/my_run
+   ```
+2. Open the viewer in another terminal:
+   ```bash
+   cargo run -p marl-viewer-rs --release -- output/my_run --tick 0
+   ```
+3. Use `Reload` in the viewer GUI to pick up new ticks as the engine writes
+   them.
+
+### Validating output quickly
+
+```bash
+python scripts/check_binary_dump.py output/run_128x128x64 0
+python scripts/check_binary_dump.py output/run_128x128x64 500
+```
+
+### Inspecting chemistry as images
+
+Enable a few XZ cross-sections in `marl.toml`:
+
+```toml
+[output]
+xz_snapshot_species = [1, 3, 4]   # oxidant, carbon, waste
+image_interval = 100
+```
+
+This produces `oxidant_xz_<tick>.ppm`, `carbon_xz_<tick>.ppm`, and
+`organic_waste_xz_<tick>.ppm` every 100 ticks. PPM files open in most image
+viewers or can be converted with ImageMagick:
+
+```bash
+convert oxidant_xz_500.ppm oxidant_xz_500.png
+```
+
+### Changing grid size
+
+Edit `crates/marl-engine/src/config.rs`:
+
+```rust
+pub const GRID_X: usize = 64;
+pub const GRID_Y: usize = 64;
+pub const GRID_Z: usize = 32;
+```
+
+Then rebuild:
+
+```bash
+cargo build -p marl-engine --release
+```
+
+The default output directory and binary file sizes will adjust automatically.
+
+---
+
+## Troubleshooting
+
+### "Adapter not found" / black window in viewer
+
+The viewer requires a `wgpu`-compatible backend (Vulkan, Metal, DX12). If your
+system doesn't have GPU drivers, try:
+- On Linux, install `mesa-vulkan-drivers` or `vulkan-tools` for software
+  rendering via `llvmpipe`.
+- Verify with `vulkaninfo | grep deviceName`.
+
+### Viewer says "no snapshot loaded"
+
+The output directory doesn't contain `run_meta.json` or has no `tick_*.field.bin`
+files. Verify the path and that the engine has written at least one snapshot.
+Use the GUI `Open…` button or text field to navigate to a valid directory.
+
+### "grid dimensions in run_meta.json don't match compile-time constants"
+
+The viewer was compiled with different `GRID_X`/`GRID_Y`/`GRID_Z` values than
+the engine that produced the output. Recompile both with matching constants.
+
+### `rfd` folder picker does nothing
+
+The native file dialog (`rfd` crate) may not be available on all platforms or
+desktop environments. Use the text field to type or paste the output directory
+path, then click `Load Dir`.
+
+### Snapshot ticks don't update while engine is running
+
+Click `Reload` in the viewer GUI to rescan the output directory for new tick
+files. The viewer does not watch the filesystem automatically.
+
+### TOML config is ignored / falling back to defaults
+
+Check your TOML syntax. A missing `[simulation]` or `[output]` section header
+will cause the entire file to be ignored. Run with only the config change to
+isolate:
+
+```bash
+cargo run -p marl-engine --release -- --config my.toml --ticks 10 --stats 1
+```
+
+Watch stdout for the stats line — if it shows zero cells or odd chemistry, the
+config may have been rejected. The engine silently falls back to defaults on
+parse failure.
+
+### `Normal::new` panic on startup
+
+Setting `mutation_stddev = 0.0` or a negative value will cause a runtime panic
+in the mutation RNG. Keep `mutation_stddev > 0.0`.

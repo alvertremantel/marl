@@ -10,43 +10,23 @@ MARL is a CPU-based Rust research prototype for 3D reaction-diffusion cellular a
 
 The current codebase is a Winogradsky-column style simulation: oxidant and carbon are sourced at the top boundary, reductant is sourced at the bottom boundary, and three starter metabolisms are seeded at different depths. Birth, death, quiescence, and mutation emerge from local chemistry and per-cell rulesets rather than from any explicit fitness function.
 
-## Current State
-
-- Language: Rust
-- Execution model: CPU default, optional GPU field diffusion prototype
-- Default grid: `128 x 128 x 64`
-- Transport medium: diffusion only
-- Cell occupancy: one cell per voxel
-- Light model: Beer-Lambert attenuation from the surface
-- Evolution path: vertical mutation during division
-- Horizontal gene transfer: code exists but is not currently wired into the main loop
-
-This repository is a functional prototype, not a polished platform. The core simulation loop, field physics, lineage tracking, snapshots, and run summaries are implemented. Several intended extensions are present only in partial form.
-
 ## What The Simulation Does
 
-- Maintains a dense 3D extracellular field with `12` external species
-- Maintains a sparse cell population with `16` internal species and up to `16` reactions per cell
+- Maintains a dense 3D extracellular field with 12 external chemical species
+- Maintains a sparse cell population with 16 internal species and up to 16 reactions per cell
 - Diffuses chemistry with cell-body exclusion and local diffusion slowdown from structural deposits
-- Computes a per-voxel light field from top-down attenuation
+- Computes a per-voxel light field from top-down Beer-Lambert attenuation
 - Updates each cell through receptor, transport, reaction, effector, and fate phases
 - Supports mutation of kinetic parameters and rare structural rewiring of reactions
-- Writes raw binary field/cell snapshots for viewer ingestion, plus optional legacy CSV/PPM diagnostics
+- Writes raw binary field/cell snapshots for viewer ingestion, plus optional CSV/PPM diagnostics
 
-## Architecture At A Glance
+## Key Crates
 
-- `crates/marl-engine/src/config.rs`: compile-time grid constants and runtime config structs (TOML + CLI)
-- `crates/marl-engine/src/field.rs`: 3D extracellular chemistry and parallel diffusion
-- `crates/marl-engine/src/cell.rs`: cell rulesets, cell tick, mutation logic, lineage state
-- `crates/marl-engine/src/light.rs`: top-down light attenuation field
-- `crates/marl-engine/src/sim/`: seeding, spatial helpers, starter metabolisms, and stats helpers
-- `crates/marl-engine/src/main.rs`: engine binary orchestration and tick loop
-- `crates/marl-engine/src/data.rs`: CSV logging, reaction registry, end-of-run summary
-- `crates/marl-engine/src/snapshot.rs`: PPM cross-sections and ancestry images
-- `crates/marl-format/`: shared binary metadata and cell-record schema for engine/viewer interop
-- `crates/marl-viewer-rs/`: standalone `wgpu` binary viewer with an `egui` GUI shell for directory loading, tick navigation, and view settings
+- [`marl-engine`](crates/marl-engine/) — simulation library, engine binary, and optional GPU diffusion prototype
+- [`marl-viewer-rs`](crates/marl-viewer-rs/) — standalone `wgpu` 3D viewer with `egui` GUI
+- [`marl-format`](crates/marl-format/) — shared binary metadata and cell-record schema for engine/viewer interop
 
-More detail lives in `INFO.md`.
+A detailed architecture walkthrough lives in [`docs/INFO.md`](docs/INFO.md).
 
 ## Important Model Choices
 
@@ -60,102 +40,47 @@ More detail lives in `INFO.md`.
 ## Known In-Progress Or Partial Areas
 
 - Receptors are computed each tick but are not yet used to gate transport or reactions.
-- `hgt.rs` is implemented, but HGT is currently disabled in the main loop.
-- The code includes spare external and internal species capacity for future chemistry.
+- Horizontal gene transfer (`hgt.rs`) is implemented, but HGT is currently disabled in the main loop.
+- The code includes spare external and internal species capacity for future chemistry expansion.
 - GPU diffusion exists as an optional prototype behind the engine crate's `gpu` feature.
 
+## State
 
-## Running
+- Language: Rust
+- Execution model: CPU default, optional GPU field diffusion prototype
+- Default grid: `128 × 128 × 64`
+- Transport medium: diffusion only
+- Cell occupancy: one cell per voxel
+- Light model: Beer-Lambert attenuation from the surface
+- Evolution path: vertical mutation during division
+- Configuration: runtime TOML + CLI for most physics and output parameters; grid dimensions remain compile-time
 
-Build and run with Cargo:
-
-```bash
-cargo run -p marl-engine --release -- --ticks 5000 --stats 100 --snapshot 500 --images 500
-```
-
-### Runtime Configuration
-
-All physics, chemistry, biology, and output parameters are runtime-configurable via an optional TOML file and CLI overrides. Grid dimensions remain compile-time constants (they determine array sizes).
-
-Load settings from a TOML file:
-
-```bash
-cargo run -p marl-engine --release -- --config marl.toml
-```
-
-A sample `marl.toml` with all defaults is included in the repository. Copy it and modify values for parameter sweeps or reproducible scenarios. Partial TOML files work — missing keys fall back to built-in defaults.
-
-Supported CLI flags (override TOML values):
-
-- `--config <path>` — path to TOML config file (default: `marl.toml` in CWD)
-- `--ticks <n>` — total simulation ticks
-- `--stats <n>` — stdout stats interval
-- `--snapshot <n>` — binary and optional CSV snapshot interval
-- `--images <n>` — optional PPM image snapshot interval
-- `--seed <n>` — cells to seed per starter metabolism
-- `--output <dir>` — output directory
-
-Grid dimensions are compile-time constants in `crates/marl-engine/src/config.rs`, so changing grid size requires recompilation.
-
-## Outputs
-
-Runs write into an output directory like `output/run_128x128x64` and produce by default:
-
-- `run_meta.json`: grid dimensions, species count, snapshot cadence, and binary layouts
-- `tick_<T>.field.bin`: raw `f32` field data in `[z][y][x][species]` order
-- `tick_<T>.cells.bin`: packed viewer cell records (`pos`, `lineage_id`, `starter_type`, `energy`)
-- `summary.md`: end-of-run run summary
-
-Legacy diagnostics are opt-in via `marl.toml`:
-
-- `ticks.csv`: per-tick population and z-layer counts (`write_tick_log = true`)
-- `chem_<tick>.csv`, `cells_<tick>.csv`, `reactions_<tick>.csv`, `reaction_registry.csv`: CSV snapshots (`write_csv_snapshots = true`)
-- `*.ppm`: cross-sections, density maps, and ancestry maps (set `xz_snapshot_species`, `xy_slice_depths_frac`, `write_density_map`, or `write_ancestry_map`)
-
-Validate a binary output tick with:
-
-```bash
-python scripts/check_binary_dump.py output/run_128x128x64 0
-```
-
-## Standalone Viewer
-
-The standalone `wgpu` viewer lives in its own workspace crate. By default it renders a 3D isometric volume from a binary snapshot with direct cell voxel overlay — occupied voxels are shown as solid markers colored by microbe starter type (phototroph/red, chemolithotroph/green, anaerobe/blue). The extracellular chemical field is shown as a translucent volume behind the cells.
-
-The viewer now includes an `egui` GUI shell that lets you load an output directory, navigate between available snapshot ticks, and adjust view settings interactively:
-
-- **Directory:** text field, `Open…` button (native folder picker), and `Load Dir` button.
-- **Tick navigation:** numeric tick entry, `Go`, `First`/`Prev`/`Next`/`Last` buttons, and `Reload` to rescan the output directory for new snapshots.
-- **View Settings (collapsible side panel):** species, view mode, cell mode, cell alpha, density scale, exposure, and raymarch steps — with `Apply` and `Reset` buttons.
-- The WGSL raymarch renders as a background pass; the `egui` controls overlay on top.
-- On startup with a missing or invalid directory, a 1×1×1 placeholder is shown and the GUI opens so you can load a valid directory.
-
-CLI flags work as before and set the initial state of the GUI:
-
-```bash
-cargo run -p marl-viewer-rs --release -- output/run_128x128x64 --tick 0
-```
-
-Useful viewer flags:
-- `--tick <n>` — snapshot tick (default: `0`)
-- `--species <n>` — external chemical species to render (default: `1`)
-- `--view <iso|top>` — isometric volume or legacy top-down projection (default: `iso`)
-- `--cells <off|starter|energy>` — cell coloring mode (default: `starter`)
-- `--cell-alpha <f>` — opacity of cell markers, `(0,1]` (default: `0.95`)
-- `--scale <f>` — concentration-to-density scale (default: `2.0`)
-- `--exposure <f>` — opacity multiplier (default: `18.0`)
-- `--steps <n>` — raymarch sample count (default: `160`)
-
-For legacy field-only top-down rendering:
-```bash
-cargo run -p marl-viewer-rs --release -- output/run_128x128x64 --tick 0 --view top --cells off --species 1
-```
-
-**Microbe coloring** uses the `starter_type` field from cell records (ancestry category from the initial seeding), not inferred genotype-level species. Cell rendering requires `write_binary_cells = true` (default) in the engine output config.
+This repository is a functional prototype, not a polished platform. The core simulation loop, field physics, lineage tracking, snapshots, run summaries, and viewer are implemented. Several intended extensions are present only in partial form.
 
 ## Status Summary
 
-The project is already a real simulation rather than a scaffold. Its current strengths are the field/cell split, the spatial exclusion model, the seeded ecological gradient, and the data products. Its main unfinished areas are adaptive receptor wiring, re-enabled HGT, and broader chemistry expansion.
+The project is already a real simulation rather than a scaffold. Its current strengths are the field/cell split, the spatial exclusion model, the seeded ecological gradient, the 3D viewer, and the data products. Its main unfinished areas are adaptive receptor wiring, re-enabled HGT, and broader chemistry expansion.
+
+## Documentation
+
+- **[`docs/USAGE.md`](docs/USAGE.md)** — build, configure, run the engine and viewer, troubleshoot
+- **[`docs/INFO.md`](docs/INFO.md)** — deep technical characterization, architecture, tick semantics, spatial model, evolution
+- **[`docs/SCRIPTS.md`](docs/SCRIPTS.md)** — project utility scripts
+
+## Quick Start
+
+```bash
+# Run a short simulation
+cargo run -p marl-engine --release -- --ticks 5000 --stats 100 --snapshot 500
+
+# View the results
+cargo run -p marl-viewer-rs --release -- output/run_128x128x64 --tick 0
+
+# Validate a binary snapshot
+python scripts/check_binary_dump.py output/run_128x128x64 0
+```
+
+See [`docs/USAGE.md`](docs/USAGE.md) for comprehensive build and run instructions.
 
 ## Citation
 
@@ -163,4 +88,4 @@ If you use this software in your scholarly work, please attribute it with this c
 
 > Geosmin Jones. (2026). *Microbial Automata with Reaction-Diffusion and Lineage* (Version 0.2.0.1) [Desktop Software]. Github. https://github.com/alvertremantel/marl
 
-If you're publishing in a big kid venue, you're free to shoot me an email at geosminjones@gmail.com for my real name and Google Scholar profile. 
+If you're publishing in a big kid venue, you're free to shoot me an email at geosminjones@gmail.com for my real name and Google Scholar profile.

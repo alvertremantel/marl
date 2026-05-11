@@ -38,9 +38,12 @@
 - `crates/marl-engine/tests/gpu_diffusion.rs`: CPU/GPU equivalence tests compiled when `gpu` feature is enabled
 
 ## Documentation And Agent Context
-- `README.md`: user-facing overview, run commands, config and output documentation
+- `README.md`: project landing page (overview, architecture, model choices, status, citation)
+- `docs/USAGE.md`: comprehensive usage guide (build, engine, viewer, outputs, workflows, troubleshooting)
+- `docs/INFO.md`: deep technical characterization and architecture reference
+- `docs/SCRIPTS.md`: documentation for project utility scripts
+- `scripts/check_binary_dump.py`: quick binary output sanity checker
 - `.agents/plans/`: implementation plans
 - `.agents/context/STATUS.md`: current project status and completed work
 - `.agents/context/NOTES.md`: durable implementation decisions and gotchas
 - `.agents/context/MAP.md`: this concise structure map
-- `scripts/check_binary_dump.py`: quick binary output sanity checker

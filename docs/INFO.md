@@ -2,7 +2,7 @@
 
 ## Overview
 
-MARL is a 3D reaction-diffusion cellular automaton written in Rust. It is aimed at open-ended microbial evolution in a vertically structured environment rather than at a single fixed game or benchmark. The current implementation is a CPU prototype of a Winogradsky-column-like system with sparse cells, a dense extracellular field, top-down light attenuation, and lineage-producing cell division.
+MARL is a 3D reaction-diffusion cellular automaton written in Rust. It is aimed at open-ended microbial evolution in a vertically structured environment rather than at a single fixed game or benchmark. The codebase is organized as a Cargo workspace with three crates. The current implementation is a CPU prototype (with an optional GPU diffusion path) of a Winogradsky-column-like system with sparse cells, a dense extracellular field, top-down light attenuation, and lineage-producing cell division.
 
 Today the code is small enough to read end to end, and it is already coherent. It is also clearly mid-iteration: a few systems are fully implemented, a few are intentionally skeletal, and a few were started and then left disconnected when work moved elsewhere.
 
@@ -10,13 +10,15 @@ Today the code is small enough to read end to end, and it is already coherent. I
 
 The project has a clean split between environment, cells, orchestration, and outputs.
 
-- `config.rs` defines compile-time physics constants and runtime run parameters.
-- `field.rs` owns the extracellular chemical field and the diffusion solver.
-- `cell.rs` owns the evolvable cell ruleset, internal state, per-tick update, and mutation logic.
-- `light.rs` computes a separate light availability field from the current chemistry and occupancy.
-- `main.rs` ties everything together: seeding, tick order, births, deaths, and output cadence.
-- `data.rs` and `snapshot.rs` convert state into files for later analysis.
-- `hgt.rs` contains a horizontal gene transfer primitive that is currently not invoked.
+- `crates/marl-engine/src/config.rs` defines compile-time physics constants and runtime run parameters.
+- `crates/marl-engine/src/field.rs` owns the extracellular chemical field and the diffusion solver.
+- `crates/marl-engine/src/cell.rs` owns the evolvable cell ruleset, internal state, per-tick update, and mutation logic.
+- `crates/marl-engine/src/light.rs` computes a separate light availability field from the current chemistry and occupancy.
+- `crates/marl-engine/src/main.rs` ties everything together: seeding, tick order, births, deaths, and output cadence.
+- `crates/marl-engine/src/data.rs` and `crates/marl-engine/src/snapshot.rs` convert state into files for later analysis.
+- `crates/marl-engine/src/hgt.rs` contains a horizontal gene transfer primitive that is currently not invoked.
+- `crates/marl-engine/src/binary_dump.rs` writes raw binary field/cell snapshots and `run_meta.json` for the viewer.
+- `crates/marl-format/src/lib.rs` owns the shared binary schema (`RunMeta`, `ViewerCellRecord`, field layout constants).
 
 Conceptually, the simulation loop is:
 
@@ -33,7 +35,7 @@ One important caveat: cells are updated sequentially inside the tick, and each c
 
 ### Extracellular Field
 
-The extracellular environment is a dense 3D field stored as a flat `Vec<f32>` in `field.rs`. Each voxel stores `S_EXT = 12` external species. The current default grid is `128 x 128 x 64`, so the field is calibration-scale rather than the much larger target implied by earlier project notes.
+The extracellular environment is a dense 3D field stored as a flat `Vec<f32>` in `crates/marl-engine/src/field.rs`. Each voxel stores `S_EXT = 12` external species. The current default grid is `128 x 128 x 64`, so the field is calibration-scale rather than the much larger target implied by earlier project notes.
 
 Important external species in current use:
 
@@ -150,7 +152,7 @@ That means the simulation's notion of crowding is not abstract. It is implemente
 
 ## Light Model
 
-`light.rs` computes a separate scalar field using a Beer-Lambert style top-down sweep.
+`crates/marl-engine/src/light.rs` computes a separate scalar field using a Beer-Lambert style top-down sweep.
 
 Attenuation sources are currently:
 
@@ -181,7 +183,7 @@ The current run seeds three metabolisms in different depth bands.
 - use reductant as their main energy source
 - include an oxidant-toxicity mechanism that makes oxygenated environments hostile
 
-These are encoded directly in `main.rs` as starter factory functions, not as external data files.
+These are encoded directly in `crates/marl-engine/src/main.rs` as starter factory functions, not as external data files.
 
 ## Evolution And Lineage
 
@@ -204,9 +206,19 @@ The structural rewiring logic is gene-duplication-inspired, but not a literal fu
 
 The output side of the project is already quite useful.
 
+### Binary Viewer Outputs
+
+`crates/marl-engine/src/binary_dump.rs` writes the high-fidelity binary outputs consumed by the standalone viewer:
+
+- `run_meta.json` — grid dimensions, species counts, field byte length, and cell record stride
+- `tick_<T>.field.bin` — raw little-endian `f32` field data in `[z][y][x][species]` order
+- `tick_<T>.cells.bin` — packed 25-byte `ViewerCellRecord` array (position, lineage ID, starter type, energy)
+
+The shared schema for these files lives in `crates/marl-format/` so both engine and viewer can reference the same constants without code duplication.
+
 ### CSV And Markdown Outputs
 
-`data.rs` writes:
+`crates/marl-engine/src/data.rs` writes:
 
 - `ticks.csv`
 - `chem_<tick>.csv`
@@ -219,7 +231,7 @@ The reaction registry is especially useful because it gives stable IDs to reacti
 
 ### Image Outputs
 
-`snapshot.rs` writes raw PPM images for:
+`crates/marl-engine/src/snapshot.rs` writes raw PPM images for:
 
 - XZ chemical cross-sections
 - XY carbon slices
@@ -239,6 +251,7 @@ The project is in a good prototype state. It is not a toy, but it is also not ye
 - light attenuation field
 - cell tick loop with transport, reaction, secretion, death, and division prep
 - mutation and lineage generation
+- binary viewer snapshots (field, cells, metadata) and an interactive `wgpu`/`egui` 3D viewer
 - run summaries and useful raw outputs
 - a coherent seeded ecological scenario
 
@@ -252,8 +265,7 @@ The project is in a good prototype state. It is not a toy, but it is also not ye
 ### Stale Or Aspirational Elements
 
 - older descriptions of much larger grid sizes no longer match the actual default configuration
-- older GPU-facing intent is not reflected in current code, which is entirely CPU-based
-- the `half` dependency is present but unused
+- older GPU-facing intent from early project notes predates the current CPU-first architecture (the optional GPU diffusion path now exists as a prototype behind the `gpu` feature)
 
 ## Practical Caveats
 
@@ -263,23 +275,25 @@ Several current simplifications matter if this code is used for serious experime
 - Dead cells are removed; their internals are not lysed back into the field.
 - Quiescence is partial rather than a deep dormancy mode.
 - Cells are updated sequentially with immediate field writes inside each tick.
-- Runtime configuration is limited; grid size is compile-time.
-- There are no tests yet.
+- Most physics, chemistry, and output parameters are runtime-configurable via TOML + CLI. Grid dimensions and species counts remain compile-time constants (they determine array sizes).
+- Unit and integration tests exist for engine field diffusion, binary dump layout, GPU diffusion equivalence, viewer CLI/IO/camera/renderer/GUI, and the shared format crate. Run with `cargo test --workspace`.
 
 These are not necessarily flaws for the present phase, but they define the boundary between prototype behavior and stronger scientific claims.
 
-## Suggested Reading Order In `src/`
+## Suggested Reading Order In `crates/marl-engine/src/`
 
 If you want to reacquire context quickly, this is the best reading sequence:
 
-1. `src/config.rs`
-2. `src/field.rs`
-3. `src/cell.rs`
-4. `src/main.rs`
-5. `src/light.rs`
-6. `src/data.rs`
-7. `src/snapshot.rs`
-8. `src/hgt.rs`
+1. `crates/marl-engine/src/config.rs`
+2. `crates/marl-engine/src/field.rs`
+3. `crates/marl-engine/src/cell.rs`
+4. `crates/marl-engine/src/main.rs`
+5. `crates/marl-engine/src/light.rs`
+6. `crates/marl-engine/src/data.rs`
+7. `crates/marl-engine/src/snapshot.rs`
+8. `crates/marl-engine/src/hgt.rs`
+9. `crates/marl-engine/src/binary_dump.rs`
+10. `crates/marl-format/src/lib.rs`
 
 That order follows the dependency chain from assumptions, to field physics, to cell logic, to orchestration, then to outputs and unfinished extension points.
 
