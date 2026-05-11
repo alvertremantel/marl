@@ -8,10 +8,16 @@ use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
 use winit::window::Window;
 
-use crate::args::{CellMode, ViewMode, ViewerArgs};
-use crate::camera::{CameraBasis, camera_basis};
-use crate::gui::{GuiAction, GuiState, choose_initial_tick, neighbor_tick};
-use crate::io::{LoadedCell, SnapshotPayload, discover_field_ticks, load_run_meta, load_snapshot};
+#[cfg(test)]
+use marl_viewer_core::args::ViewMode;
+use marl_viewer_core::args::{CellMode, ViewerArgs};
+use marl_viewer_core::camera::{CameraBasis, camera_basis};
+use marl_viewer_core::io::{
+    LoadedCell, SnapshotPayload, discover_field_ticks, load_run_meta, load_snapshot,
+};
+use marl_viewer_core::types::{GuiAction, SnapshotInfo, choose_initial_tick, neighbor_tick};
+
+use crate::gui::GuiState;
 
 // ---------------------------------------------------------------------------
 // ViewerParams — must be #[repr(C)], Pod, and mirror WGSL Params exactly
@@ -45,28 +51,11 @@ struct SnapshotGpuResources {
 }
 
 // ---------------------------------------------------------------------------
-// SnapshotInfo — lightweight display metadata for GUI/summary
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone)]
-pub(crate) struct SnapshotInfo {
-    pub(crate) output_dir: PathBuf,
-    pub(crate) tick: u64,
-    pub(crate) species: u32,
-    pub(crate) view_mode: ViewMode,
-    pub(crate) cell_mode: CellMode,
-    pub(crate) cell_count: usize,
-    pub(crate) field_bytes: usize,
-    pub(crate) grid: [u32; 3],
-    pub(crate) s_ext: u32,
-}
-
-// ---------------------------------------------------------------------------
 // Renderer
 // ---------------------------------------------------------------------------
 
-pub(crate) struct Renderer {
-    pub(crate) window: Arc<Window>,
+pub struct Renderer {
+    pub window: Arc<Window>,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -84,7 +73,7 @@ pub(crate) struct Renderer {
 }
 
 impl Renderer {
-    pub(crate) async fn new(window: Arc<Window>, args: ViewerArgs) -> Result<Self, Box<dyn Error>> {
+    pub async fn new(window: Arc<Window>, args: ViewerArgs) -> Result<Self, Box<dyn Error>> {
         let size = window.inner_size();
         let instance = wgpu::Instance::default();
         let surface = instance.create_surface(window.clone())?;
@@ -301,12 +290,12 @@ impl Renderer {
 
     /// Forward a window event to egui. Returns `true` if egui consumed the event
     /// and a repaint is needed.
-    pub(crate) fn handle_window_event(&mut self, event: &WindowEvent) -> bool {
+    pub fn handle_window_event(&mut self, event: &WindowEvent) -> bool {
         let response = self.egui_state.on_window_event(self.window.as_ref(), event);
         response.repaint
     }
 
-    pub(crate) fn resize(&mut self, size: PhysicalSize<u32>) {
+    pub fn resize(&mut self, size: PhysicalSize<u32>) {
         if size.width == 0 || size.height == 0 {
             return;
         }
@@ -323,7 +312,7 @@ impl Renderer {
         );
     }
 
-    pub(crate) fn render(&mut self) -> RenderResult {
+    pub fn render(&mut self) -> RenderResult {
         // -------------------------------------------------------------------
         // 1. Collect egui input and build GUI
         // -------------------------------------------------------------------
@@ -697,7 +686,7 @@ impl Renderer {
 // RenderResult
 // ---------------------------------------------------------------------------
 
-pub(crate) enum RenderResult {
+pub enum RenderResult {
     Drawn,
     Skip,
     Reconfigure,

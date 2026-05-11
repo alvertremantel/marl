@@ -1,5 +1,37 @@
 # MARL Implementation Notes
 
+## Viewer Crate Decomposition (2026-05-10)
+
+### Durable decisions
+
+1. **`marl-viewer-core` contains all pure-data and I/O logic.**
+   `args.rs` (CLI parsing, `ViewerArgs`, `ViewMode`, `CellMode`), `io.rs` (snapshot loading, tick discovery, cell record parsing), `camera.rs` (camera basis computation), and `types.rs` (shared metadata types `SnapshotInfo`, `GuiAction`, plus tick navigation helpers `choose_initial_tick`, `neighbor_tick`). This crate has zero GPU/windowing dependencies — only `marl-format`, `serde`, and `serde_json`. It can be compiled and tested on headless CI.
+
+2. **`marl-viewer-render` contains the wgpu rendering pipeline + egui GUI state.**
+   `renderer.rs` (GPU surface/device/queue/pipeline, snapshot resources, egui overlay pass, action processing), `gui.rs` (`GuiState` with toolbar/sidebar drawing and `show()`), and the WGSL raymarch shader. It depends on `marl-viewer-core` plus `wgpu`, `bytemuck`, `pollster`, `winit`, `egui`, `egui-wgpu`, `egui-winit`, and `rfd`.
+
+3. **`marl-viewer-rs` is a thin binary with only 2 source files.**
+   `main.rs` (~15 lines, entry point + arg parsing) and `app.rs` (`ViewerApp` `ApplicationHandler`). Direct dependencies beyond the viewer crates: `winit` and `pollster` only.
+
+4. **`GuiState` lives in `marl-viewer-render`, not in core.**
+   The plan initially placed `GuiState` in the binary crate, but the renderer directly owns `GuiState` as a field and calls methods on it (`set_info`, `set_error`, `sync_loaded`, `show`). Since `show()` requires egui types, `GuiState` must live in a crate with egui support — `marl-viewer-render` already has those deps for the egui overlay pass.
+
+5. **`SnapshotInfo` and `GuiAction` live in `marl-viewer-core::types`.**
+   Both types are shared between the renderer and GUI with no GPU or egui dependencies. `SnapshotInfo` has only `PathBuf`, primitive types, `ViewMode`, and `CellMode`. `GuiAction` has `PathBuf`, `u64`, and unit variants.
+
+6. **`choose_initial_tick` and `neighbor_tick` are pure functions in core.**
+   These tick navigation helpers take `&[u64]` and return `Option<u64>`. They have no rendering or GUI dependencies and are independently testable.
+
+7. **The binary crate's direct deps are minimal.**
+   Only `winit` (for `EventLoop` and `ApplicationHandler`) and `pollster` (for `block_on` in `app.rs`) are direct dependencies. All egui/wgpu/rfd/serde deps are transitive through `marl-viewer-render` and `marl-viewer-core`.
+
+### Import conventions
+- `use marl_viewer_core::args::{ViewerArgs, ViewMode, CellMode}` — viewer arg types and parsing
+- `use marl_viewer_core::io::{SnapshotPayload, LoadedCell, load_snapshot, ...}` — snapshot loading
+- `use marl_viewer_core::camera::{CameraBasis, camera_basis}` — camera basis computation
+- `use marl_viewer_core::types::{SnapshotInfo, GuiAction, choose_initial_tick, neighbor_tick}` — shared metadata
+- `use marl_viewer_render::renderer::{Renderer, RenderResult}` — wgpu renderer (from binary crate)
+
 ## Engine Crate Decomposition (2026-05-10)
 
 ### Durable decisions

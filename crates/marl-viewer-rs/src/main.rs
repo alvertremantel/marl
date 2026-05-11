@@ -3,14 +3,9 @@ use std::error::Error;
 use winit::event_loop::EventLoop;
 
 mod app;
-mod args;
-mod camera;
-mod gui;
-mod io;
-mod renderer;
 
 use app::ViewerApp;
-use args::ViewerArgs;
+use marl_viewer_core::args::ViewerArgs;
 
 #[cfg(not(target_endian = "little"))]
 compile_error!("the MARL viewer expects little-endian f32 field dumps");

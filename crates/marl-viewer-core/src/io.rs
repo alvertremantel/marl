@@ -12,28 +12,28 @@ use crate::args::{CellMode, ViewerArgs};
 
 /// A validated cell record unpacked from the binary dump.
 #[derive(Debug, Clone)]
-pub(crate) struct LoadedCell {
-    pub(crate) pos: [u32; 3],
-    pub(crate) lineage_id: u64,
-    pub(crate) starter_type: u8,
-    pub(crate) energy: f32,
+pub struct LoadedCell {
+    pub pos: [u32; 3],
+    pub lineage_id: u64,
+    pub starter_type: u8,
+    pub energy: f32,
 }
 
 // ---------------------------------------------------------------------------
 // Snapshot payload
 // ---------------------------------------------------------------------------
 
-pub(crate) struct SnapshotPayload {
-    pub(crate) meta: RunMeta,
-    pub(crate) field_bytes: Vec<u8>,
-    pub(crate) cells: Vec<LoadedCell>,
-    pub(crate) tick: u64,
-    pub(crate) species: u32,
-    pub(crate) exposure: f32,
-    pub(crate) density_scale: f32,
-    pub(crate) steps: u32,
-    pub(crate) cell_mode: CellMode,
-    pub(crate) cell_alpha: f32,
+pub struct SnapshotPayload {
+    pub meta: RunMeta,
+    pub field_bytes: Vec<u8>,
+    pub cells: Vec<LoadedCell>,
+    pub tick: u64,
+    pub species: u32,
+    pub exposure: f32,
+    pub density_scale: f32,
+    pub steps: u32,
+    pub cell_mode: CellMode,
+    pub cell_alpha: f32,
 }
 
 // ---------------------------------------------------------------------------
@@ -41,7 +41,7 @@ pub(crate) struct SnapshotPayload {
 // ---------------------------------------------------------------------------
 
 /// Load and validate `run_meta.json` from an output directory.
-pub(crate) fn load_run_meta(output_dir: &std::path::Path) -> Result<RunMeta, Box<dyn Error>> {
+pub fn load_run_meta(output_dir: &std::path::Path) -> Result<RunMeta, Box<dyn Error>> {
     let meta_path = output_dir.join("run_meta.json");
     let meta_bytes =
         fs::read(&meta_path).map_err(|e| format!("failed to read {}: {e}", meta_path.display()))?;
@@ -52,7 +52,7 @@ pub(crate) fn load_run_meta(output_dir: &std::path::Path) -> Result<RunMeta, Box
     Ok(meta)
 }
 
-pub(crate) fn load_snapshot(args: &ViewerArgs) -> Result<SnapshotPayload, Box<dyn Error>> {
+pub fn load_snapshot(args: &ViewerArgs) -> Result<SnapshotPayload, Box<dyn Error>> {
     let meta = load_run_meta(&args.output_dir)?;
 
     if args.species >= meta.s_ext {
@@ -109,9 +109,7 @@ pub(crate) fn load_snapshot(args: &ViewerArgs) -> Result<SnapshotPayload, Box<dy
 /// Scans for files matching `tick_<digits>.field.bin`, parses the tick
 /// number, sorts ascending, and deduplicates. Returns an empty `Vec` if
 /// the directory is readable but contains no matching files.
-pub(crate) fn discover_field_ticks(
-    output_dir: &std::path::Path,
-) -> Result<Vec<u64>, Box<dyn Error>> {
+pub fn discover_field_ticks(output_dir: &std::path::Path) -> Result<Vec<u64>, Box<dyn Error>> {
     let entries = fs::read_dir(output_dir)
         .map_err(|e| format!("failed to read directory {}: {e}", output_dir.display()))?;
 

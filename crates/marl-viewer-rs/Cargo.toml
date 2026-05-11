@@ -8,14 +8,7 @@ name = "marl-viewer-rs"
 path = "src/main.rs"
 
 [dependencies]
-marl-format = { path = "../marl-format" }
-bytemuck.workspace = true
-egui.workspace = true
-egui-wgpu.workspace = true
-egui-winit.workspace = true
+marl-viewer-core = { path = "../marl-viewer-core" }
+marl-viewer-render = { path = "../marl-viewer-render" }
 pollster.workspace = true
-rfd.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-wgpu.workspace = true
 winit.workspace = true

@@ -1301,7 +1301,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "marl-viewer-rs"
+name = "marl-viewer-core"
+version = "0.4.0"
+dependencies = [
+ "marl-format",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "marl-viewer-render"
 version = "0.4.0"
 dependencies = [
  "bytemuck",
@@ -1309,11 +1318,20 @@ dependencies = [
  "egui-wgpu",
  "egui-winit",
  "marl-format",
+ "marl-viewer-core",
  "pollster",
  "rfd",
- "serde",
- "serde_json",
  "wgpu",
+ "winit",
+]
+
+[[package]]
+name = "marl-viewer-rs"
+version = "0.4.0"
+dependencies = [
+ "marl-viewer-core",
+ "marl-viewer-render",
+ "pollster",
  "winit",
 ]
 

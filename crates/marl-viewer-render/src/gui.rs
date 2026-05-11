@@ -1,13 +1,13 @@
 //! GUI state and action helpers for the MARL viewer.
 //!
 //! `GuiState` tracks the draft form fields, available ticks, and status
-//! messages.  `GuiAction` is returned by `GuiState::show(...)` to tell the
-//! renderer what the user wants to do next.
+//! messages.  The `show()` method draws the toolbar and sidebar, returning
+//! `GuiAction` values for the renderer to process.
 
 use std::path::PathBuf;
 
-use crate::args::{CellMode, ViewMode, ViewerArgs};
-use crate::renderer::SnapshotInfo;
+use marl_viewer_core::args::{CellMode, ViewMode, ViewerArgs};
+use marl_viewer_core::types::{GuiAction, SnapshotInfo};
 
 // ---------------------------------------------------------------------------
 // GuiState
@@ -170,24 +170,6 @@ impl GuiState {
         self.draft_exposure = format!("{:.1}", args.exposure);
         self.draft_steps = args.steps.to_string();
     }
-}
-
-// ---------------------------------------------------------------------------
-// GuiAction
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone)]
-pub(crate) enum GuiAction {
-    OpenDirectoryDialog,
-    LoadDirectory(PathBuf),
-    LoadTick(u64),
-    ReloadCurrent,
-    FirstTick,
-    LastTick,
-    PrevTick,
-    NextTick,
-    ApplyViewSettings,
-    ResetDraftFromLoaded,
 }
 
 // ---------------------------------------------------------------------------
@@ -384,41 +366,6 @@ impl GuiState {
 }
 
 // ---------------------------------------------------------------------------
-// Tick navigation helpers (pure, testable)
-// ---------------------------------------------------------------------------
-
-/// Choose the best initial tick given what the user asked for and what exists.
-/// Returns the requested tick if it is in the list, else `0` if present,
-/// otherwise the first (minimum) tick. Returns `None` if no ticks are available.
-pub(crate) fn choose_initial_tick(requested: u64, available: &[u64]) -> Option<u64> {
-    if available.is_empty() {
-        return None;
-    }
-    if available.binary_search(&requested).is_ok() {
-        return Some(requested);
-    }
-    if available.binary_search(&0).is_ok() {
-        return Some(0);
-    }
-    available.first().copied()
-}
-
-/// Find the neighboring tick at `delta` offset in the sorted list.
-/// Clamps at ends (returns `None` if moving past first or last).
-pub(crate) fn neighbor_tick(current: u64, available: &[u64], delta: i32) -> Option<u64> {
-    if available.is_empty() {
-        return None;
-    }
-    let pos = available.binary_search(&current).ok()?;
-    let new_pos = if delta < 0 {
-        pos.checked_sub((-delta) as usize)?
-    } else {
-        pos.checked_add(delta as usize)?
-    };
-    available.get(new_pos).copied()
-}
-
-// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -446,54 +393,6 @@ fn tick_list_summary(ticks: &[u64]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn choose_initial_tick_requested_present() {
-        let ticks = vec![0, 10, 20, 30];
-        assert_eq!(choose_initial_tick(10, &ticks), Some(10));
-    }
-
-    #[test]
-    fn choose_initial_tick_zero_fallback() {
-        let ticks = vec![0, 500, 1000];
-        assert_eq!(choose_initial_tick(42, &ticks), Some(0));
-    }
-
-    #[test]
-    fn choose_initial_tick_first_when_zero_missing() {
-        let ticks = vec![5, 10, 15];
-        assert_eq!(choose_initial_tick(42, &ticks), Some(5));
-    }
-
-    #[test]
-    fn choose_initial_tick_empty_returns_none() {
-        assert_eq!(choose_initial_tick(0, &[]), None);
-    }
-
-    #[test]
-    fn neighbor_tick_next() {
-        let ticks = vec![0, 500, 1000];
-        assert_eq!(neighbor_tick(500, &ticks, 1), Some(1000));
-        assert_eq!(neighbor_tick(1000, &ticks, 1), None); // at end
-    }
-
-    #[test]
-    fn neighbor_tick_prev() {
-        let ticks = vec![0, 500, 1000];
-        assert_eq!(neighbor_tick(500, &ticks, -1), Some(0));
-        assert_eq!(neighbor_tick(0, &ticks, -1), None); // at start
-    }
-
-    #[test]
-    fn neighbor_tick_current_not_found() {
-        let ticks = vec![0, 500, 1000];
-        assert_eq!(neighbor_tick(42, &ticks, 1), None);
-    }
-
-    #[test]
-    fn neighbor_tick_empty() {
-        assert_eq!(neighbor_tick(0, &[], 1), None);
-    }
 
     #[test]
     fn tick_list_summary_small() {

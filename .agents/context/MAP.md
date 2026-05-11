@@ -1,7 +1,7 @@
 # MARL Repo Map
 
 ## Cargo Workspace
-- `Cargo.toml`: virtual workspace manifest with 9 crates under `crates/`
+- `Cargo.toml`: virtual workspace manifest with 11 crates under `crates/`
 - `crates/marl-config/`: compile-time grid constants + runtime `SimulationConfig`/`OutputConfig`/`Config` (zero simulation deps, only serde + toml)
 - `crates/marl-cell/`: cellular biology — `CellState`, `Ruleset`, `Reaction`, all param types, 5-phase `tick()`, `mutate()`, HGT (depends on `marl-config` + rand)
 - `crates/marl-field/`: extracellular physics — `Field` (CPU diffusion), `LightField` (Beer-Lambert attenuation) (depends on `marl-config` + rayon)
@@ -10,7 +10,6 @@
 - `crates/marl-gpu/`: optional GPU diffusion — `GpuFieldDiffuser`, `GpuContext`, WGSL shader, CPU/GPU equivalence tests (depends on `marl-config` + `marl-field` + wgpu)
 - `crates/marl-engine/`: thin binary crate (~10 lines) — loads config, forwards to `marl_sim::run()`
 - `crates/marl-format/`: shared binary schema — `RunMeta`, `ViewerCellRecord`, field layout constants (unchanged, bridge between engine and viewer)
-- `crates/marl-viewer-rs/`: standalone `wgpu` viewer with `egui` GUI (depends on `marl-format` only)
 
 ## Dependency DAG
 ```
@@ -44,15 +43,31 @@ marl-engine (bin)  ← depends on marl-sim (+ forwards gpu feature to marl-sim)
 - `crates/marl-output/src/snapshot.rs`: optional PPM cross-sections, density maps, and ancestry maps
 - `crates/marl-format/`: shared binary schema constants, `RunMeta`, field byte-length helper, and packed `ViewerCellRecord`
 
-## Standalone Viewer
-- `crates/marl-viewer-rs/src/main.rs`: thin viewer binary entrypoint
-- `crates/marl-viewer-rs/src/args.rs`: viewer CLI parsing with isometric/cell mode flags and GUI label helpers
-- `crates/marl-viewer-rs/src/io.rs`: `run_meta.json`, field snapshot, cell record loading, and tick discovery
-- `crates/marl-viewer-rs/src/camera.rs`: deterministic orthographic camera basis for iso/top views
-- `crates/marl-viewer-rs/src/renderer.rs`: `wgpu` renderer with reloadable snapshot resources, 3D field/cell texture upload, egui overlay pass, and action processing
-- `crates/marl-viewer-rs/src/gui.rs`: `egui` GUI state, action enum, toolbar/sidebar layout, tick navigation helpers, view settings controls, and unit tests
-- `crates/marl-viewer-rs/src/app.rs`: `winit` application/event loop handling with egui event forwarding
-- `crates/marl-viewer-rs/src/viewer_raymarch.wgsl`: full-screen raymarch shader with isometric ray/AABB traversal, chemical field sampling, and cell voxel compositing
+## Standalone Viewer (3 crates)
+
+### `marl-viewer-core` — Pure data + I/O (no GPU/windowing deps)
+- `crates/marl-viewer-core/src/args.rs`: `ViewerArgs`, `ViewMode`, `CellMode`, CLI parsing, `usage()` (deps: std only)
+- `crates/marl-viewer-core/src/io.rs`: `SnapshotPayload`, `LoadedCell`, `load_snapshot()`, `discover_field_ticks()`, cell record parsing (deps: marl-format, serde_json)
+- `crates/marl-viewer-core/src/camera.rs`: `CameraBasis`, `camera_basis()` (deps: std only)
+- `crates/marl-viewer-core/src/types.rs`: `SnapshotInfo`, `GuiAction`, `choose_initial_tick()`, `neighbor_tick()`
+
+### `marl-viewer-render` — wgpu rendering pipeline + egui GUI state
+- `crates/marl-viewer-render/src/renderer.rs`: `Renderer`, `ViewerParams`, texture creation, bind groups, egui overlay pass, action processing (deps: wgpu, bytemuck, pollster, winit, egui-wgpu, egui-winit, rfd)
+- `crates/marl-viewer-render/src/gui.rs`: `GuiState`, `show()`, toolbar/sidebar layout, view settings controls (deps: egui, marl-viewer-core)
+- `crates/marl-viewer-render/src/viewer_raymarch.wgsl`: full-screen raymarch shader
+
+### `marl-viewer-rs` — Thin binary + winit app shell
+- `crates/marl-viewer-rs/src/main.rs`: entry point (~15 lines)
+- `crates/marl-viewer-rs/src/app.rs`: `ViewerApp` `ApplicationHandler`
+
+### Viewer dependency DAG
+```
+marl-viewer-core    ← marl-format + serde + serde_json (no GPU/windowing deps)
+    ↓
+marl-viewer-render  ← marl-viewer-core + wgpu + bytemuck + pollster + winit + egui*
+    ↓
+marl-viewer-rs      ← marl-viewer-core + marl-viewer-render + winit + pollster
+```
 
 ## GPU Prototype
 - `crates/marl-gpu/src/context.rs`: GPU device/queue creation with error types

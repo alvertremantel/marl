@@ -1,0 +1,16 @@
+[package]
+name = "marl-viewer-render"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+marl-format = { path = "../marl-format" }
+marl-viewer-core = { path = "../marl-viewer-core" }
+bytemuck.workspace = true
+egui.workspace = true
+egui-wgpu.workspace = true
+egui-winit.workspace = true
+pollster.workspace = true
+rfd.workspace = true
+wgpu.workspace = true
+winit.workspace = true

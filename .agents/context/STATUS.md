@@ -2,6 +2,45 @@
 
 ## Current Branch: tweak/outputs
 
+## Completed: Viewer Crate Decomposition (2026-05-10)
+
+Decomposed the single `crates/marl-viewer-rs` crate (~7 modules, ~3000 lines) into 3 crates: `marl-viewer-core` (pure data + I/O), `marl-viewer-render` (wgpu pipeline + egui GUI), and the thin `marl-viewer-rs` binary.
+
+### New crate topology
+- `marl-viewer-core`: pure data and I/O — `args.rs` (CLI parsing, `ViewerArgs`, `ViewMode`, `CellMode`), `io.rs` (snapshot loading, tick discovery, cell record parsing), `camera.rs` (camera basis computation), `types.rs` (shared metadata types: `SnapshotInfo`, `GuiAction`, tick navigation helpers) — zero GPU/windowing deps
+- `marl-viewer-render`: wgpu rendering pipeline — `renderer.rs` (GPU surface/device/queue/pipeline, snapshot resources, egui overlay pass, action processing), `gui.rs` (`GuiState`, toolbar/sidebar drawing), `viewer_raymarch.wgsl` — depends on wgpu, bytemuck, pollster, winit, egui*
+- `marl-viewer-rs`: thin binary — `main.rs` (~15 lines), `app.rs` (winit `ApplicationHandler`)
+
+### Dependency DAG
+```
+marl-viewer-core    ← marl-format + serde + serde_json (no GPU/windowing deps)
+    ↓
+marl-viewer-render  ← marl-viewer-core + wgpu + bytemuck + pollster + winit + egui*
+    ↓
+marl-viewer-rs      ← marl-viewer-core + marl-viewer-render + winit + pollster
+```
+
+### Key design decisions
+- `SnapshotInfo` and `GuiAction` live in `marl-viewer-core::types` as shared metadata — both the renderer and GUI need them
+- `choose_initial_tick` and `neighbor_tick` are pure functions in `marl-viewer-core::types` (no GUI deps)
+- `GuiState` lives in `marl-viewer-render` along with its `show()` method since it requires egui types
+- `marl-viewer-core` can be compiled and tested on headless CI (no GPU required)
+- The binary crate has only 2 direct deps beyond the viewer crates: `winit` and `pollster`
+
+### Verification
+- `cargo fmt --all`: passes
+- `cargo build --workspace --release`: zero errors, zero warnings
+- `cargo test --workspace`: 72 tests pass (same count as before decomposition)
+- `cargo run -p marl-viewer-rs -- --help`: prints usage message and exits cleanly
+- `cargo check -p marl-viewer-core`: builds independently (headless CI compatible)
+- 11 workspace members present in `cargo metadata`
+
+### Notes
+- `marl-viewer-core` has zero GPU/windowing dependencies — only `marl-format`, `serde`, `serde_json`
+- `marl-viewer-render` has all egui/wgpu/rfd deps; the binary only directly depends on `winit` and `pollster` beyond the viewer crates
+- The original `marl-viewer-rs/src/args.rs`, `io.rs`, `camera.rs`, `renderer.rs`, `gui.rs`, and `viewer_raymarch.wgsl` have been deleted from the binary crate
+- `marl-viewer-rs` now contains only `main.rs` and `app.rs`
+
 ## Completed: Engine Crate Decomposition (2026-05-10)
 
 Decomposed the monolithic `crates/marl-engine` crate (~12 modules, one binary, one optional GPU feature) into 7 focused crates with a thin binary driving a clear dependency DAG.

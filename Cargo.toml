@@ -8,6 +8,8 @@ members = [
     "crates/marl-gpu",
     "crates/marl-output",
     "crates/marl-sim",
+    "crates/marl-viewer-core",
+    "crates/marl-viewer-render",
     "crates/marl-viewer-rs",
 ]
 resolver = "3"

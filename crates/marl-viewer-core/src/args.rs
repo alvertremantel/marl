@@ -1,40 +1,40 @@
 use std::env;
 use std::path::PathBuf;
 
-pub(crate) const DEFAULT_OUTPUT_DIR: &str = "output/run_128x128x64";
+pub const DEFAULT_OUTPUT_DIR: &str = "output/run_128x128x64";
 
 // ---------------------------------------------------------------------------
 // Enums for new viewer modes
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ViewMode {
+pub enum ViewMode {
     Iso,
     Top,
 }
 
 impl ViewMode {
-    pub(crate) fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             ViewMode::Iso => "iso",
             ViewMode::Top => "top",
         }
     }
 
-    pub(crate) fn all() -> [ViewMode; 2] {
+    pub fn all() -> [ViewMode; 2] {
         [ViewMode::Iso, ViewMode::Top]
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CellMode {
+pub enum CellMode {
     Off,
     Starter,
     Energy,
 }
 
 impl CellMode {
-    pub(crate) fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             CellMode::Off => "off",
             CellMode::Starter => "starter",
@@ -42,7 +42,7 @@ impl CellMode {
         }
     }
 
-    pub(crate) fn all() -> [CellMode; 3] {
+    pub fn all() -> [CellMode; 3] {
         [CellMode::Off, CellMode::Starter, CellMode::Energy]
     }
 }
@@ -52,24 +52,24 @@ impl CellMode {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
-pub(crate) struct ViewerArgs {
-    pub(crate) output_dir: PathBuf,
-    pub(crate) tick: u64,
-    pub(crate) species: u32,
-    pub(crate) exposure: f32,
-    pub(crate) density_scale: f32,
-    pub(crate) steps: u32,
-    pub(crate) view_mode: ViewMode,
-    pub(crate) cell_mode: CellMode,
-    pub(crate) cell_alpha: f32,
+pub struct ViewerArgs {
+    pub output_dir: PathBuf,
+    pub tick: u64,
+    pub species: u32,
+    pub exposure: f32,
+    pub density_scale: f32,
+    pub steps: u32,
+    pub view_mode: ViewMode,
+    pub cell_mode: CellMode,
+    pub cell_alpha: f32,
 }
 
 impl ViewerArgs {
-    pub(crate) fn parse() -> Result<Self, String> {
+    pub fn parse() -> Result<Self, String> {
         Self::parse_from(env::args().skip(1))
     }
 
-    pub(crate) fn parse_from<I>(args: I) -> Result<Self, String>
+    pub fn parse_from<I>(args: I) -> Result<Self, String>
     where
         I: IntoIterator<Item = String>,
     {
@@ -157,15 +157,12 @@ impl ViewerArgs {
 // Parsing helpers
 // ---------------------------------------------------------------------------
 
-pub(crate) fn next_value(
-    args: &mut impl Iterator<Item = String>,
-    flag: &str,
-) -> Result<String, String> {
+pub fn next_value(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<String, String> {
     args.next()
         .ok_or_else(|| format!("missing value for {flag}\n\n{}", usage()))
 }
 
-pub(crate) fn parse_value<T: std::str::FromStr>(
+pub fn parse_value<T: std::str::FromStr>(
     args: &mut impl Iterator<Item = String>,
     flag: &str,
 ) -> Result<T, String> {
@@ -199,7 +196,7 @@ fn parse_cell_mode(args: &mut impl Iterator<Item = String>) -> Result<CellMode, 
     }
 }
 
-pub(crate) fn usage() -> String {
+pub fn usage() -> String {
     format!(
         "Usage: cargo run -p marl-viewer-rs --release -- [output-dir] [options]\n\n\
          Options:\n\

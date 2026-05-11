@@ -6,8 +6,8 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::{Window, WindowId};
 
-use crate::args::ViewerArgs;
-use crate::renderer::{RenderResult, Renderer};
+use marl_viewer_core::args::ViewerArgs;
+use marl_viewer_render::renderer::{RenderResult, Renderer};
 
 pub(crate) struct ViewerApp {
     args: Option<ViewerArgs>,

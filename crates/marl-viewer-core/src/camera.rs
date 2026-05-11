@@ -11,18 +11,18 @@ use crate::args::ViewMode;
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
-pub(crate) struct CameraBasis {
-    pub(crate) right: [f32; 3],
-    pub(crate) up: [f32; 3],
-    pub(crate) dir: [f32; 3],
-    pub(crate) zoom: f32,
+pub struct CameraBasis {
+    pub right: [f32; 3],
+    pub up: [f32; 3],
+    pub dir: [f32; 3],
+    pub zoom: f32,
 }
 
 // ---------------------------------------------------------------------------
 // Public constructor
 // ---------------------------------------------------------------------------
 
-pub(crate) fn camera_basis(mode: ViewMode) -> CameraBasis {
+pub fn camera_basis(mode: ViewMode) -> CameraBasis {
     match mode {
         ViewMode::Iso => iso_basis(),
         ViewMode::Top => top_basis(),
