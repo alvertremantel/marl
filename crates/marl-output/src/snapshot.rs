@@ -12,9 +12,9 @@
 //
 // No external image library needed — we write raw bytes directly.
 
-use crate::config::*;
-use crate::field::Field;
-use crate::light::LightField;
+use marl_config::*;
+use marl_field::field::Field;
+use marl_field::light::LightField;
 use std::collections::HashMap;
 use std::fs;
 use std::io::{BufWriter, Write};
@@ -289,7 +289,7 @@ pub fn write_all_snapshots(
     field: &Field,
     _light: &LightField,
     cells: &HashMap<[u16; 3], usize>,
-    cell_vec: &[crate::cell::CellState],
+    cell_vec: &[marl_cell::cell::CellState],
     tick: u64,
     out: &OutputConfig,
     _sim: &SimulationConfig,
@@ -338,7 +338,7 @@ pub fn write_all_snapshots(
 /// metabolism colonized each depth zone and whether the middle was
 /// invaded from above or below.
 pub fn write_ancestry_xz(
-    cells: &[crate::cell::CellState],
+    cells: &[marl_cell::cell::CellState],
     cell_map: &HashMap<[u16; 3], usize>,
     tick: u64,
     out_dir: &str,

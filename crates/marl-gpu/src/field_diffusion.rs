@@ -1,6 +1,6 @@
-use super::context::{GpuContext, GpuError};
-use crate::config::{GRID_X, GRID_Y, GRID_Z, S_EXT, SimulationConfig};
-use crate::field::Field;
+use crate::context::{GpuContext, GpuError};
+use marl_config::{GRID_X, GRID_Y, GRID_Z, S_EXT, SimulationConfig};
+use marl_field::field::Field;
 
 const GRID_SIZE: usize = GRID_X * GRID_Y * GRID_Z;
 const FIELD_FLOATS: usize = GRID_SIZE * S_EXT;

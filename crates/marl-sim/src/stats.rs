@@ -1,9 +1,9 @@
-use crate::cell::CellState;
-use crate::config::GRID_X;
-use crate::config::GRID_Y;
-use crate::config::GRID_Z;
-use crate::field::Field;
-use crate::light::LightField;
+use marl_cell::cell::CellState;
+use marl_config::GRID_X;
+use marl_config::GRID_Y;
+use marl_config::GRID_Z;
+use marl_field::field::Field;
+use marl_field::light::LightField;
 use std::time::Instant;
 
 pub fn print_stats(

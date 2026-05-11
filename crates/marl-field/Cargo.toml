@@ -1,0 +1,8 @@
+[package]
+name = "marl-field"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+marl-config = { path = "../marl-config" }
+rayon.workspace = true

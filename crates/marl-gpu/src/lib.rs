@@ -1,5 +1,3 @@
-//! GPU-accelerated compute path for MARL.
-
 pub mod context;
 pub mod field_diffusion;
 

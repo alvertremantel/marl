@@ -1,6 +1,6 @@
-use crate::cell::CellState;
-use crate::config::{GRID_X, GRID_Y, GRID_Z, SimulationConfig};
-use crate::field::Field;
+use marl_cell::cell::CellState;
+use marl_config::{GRID_X, GRID_Y, GRID_Z, SimulationConfig};
+use marl_field::field::Field;
 use rand::Rng;
 use std::collections::HashMap;
 

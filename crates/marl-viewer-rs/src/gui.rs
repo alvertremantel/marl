@@ -208,176 +208,176 @@ impl GuiState {
         #[allow(deprecated)]
         egui::TopBottomPanel::top("marl_toolbar").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                    ui.label("Directory:");
-                    if ui
-                        .add(
-                            egui::TextEdit::singleline(&mut self.directory_text)
-                                .hint_text("path/to/output")
-                                .desired_width(300.0),
-                        )
-                        .lost_focus()
-                        && ui.input(|i| i.key_pressed(egui::Key::Enter))
-                    {
-                        actions.push(GuiAction::LoadDirectory(PathBuf::from(
-                            self.directory_text.clone(),
-                        )));
-                    }
-                    if ui.button("Open…").clicked() {
-                        actions.push(GuiAction::OpenDirectoryDialog);
-                    }
-                    if ui.button("Load Dir").clicked() {
-                        actions.push(GuiAction::LoadDirectory(PathBuf::from(
-                            self.directory_text.clone(),
-                        )));
-                    }
+                ui.label("Directory:");
+                if ui
+                    .add(
+                        egui::TextEdit::singleline(&mut self.directory_text)
+                            .hint_text("path/to/output")
+                            .desired_width(300.0),
+                    )
+                    .lost_focus()
+                    && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                {
+                    actions.push(GuiAction::LoadDirectory(PathBuf::from(
+                        self.directory_text.clone(),
+                    )));
+                }
+                if ui.button("Open…").clicked() {
+                    actions.push(GuiAction::OpenDirectoryDialog);
+                }
+                if ui.button("Load Dir").clicked() {
+                    actions.push(GuiAction::LoadDirectory(PathBuf::from(
+                        self.directory_text.clone(),
+                    )));
+                }
 
-                    ui.separator();
+                ui.separator();
 
-                    ui.label("Tick:");
-                    if ui
-                        .add(egui::TextEdit::singleline(&mut self.tick_text).desired_width(60.0))
-                        .lost_focus()
-                        && ui.input(|i| i.key_pressed(egui::Key::Enter))
-                    {
-                        if let Ok(tick) = self.tick_text.parse::<u64>() {
-                            actions.push(GuiAction::LoadTick(tick));
-                        }
+                ui.label("Tick:");
+                if ui
+                    .add(egui::TextEdit::singleline(&mut self.tick_text).desired_width(60.0))
+                    .lost_focus()
+                    && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                {
+                    if let Ok(tick) = self.tick_text.parse::<u64>() {
+                        actions.push(GuiAction::LoadTick(tick));
                     }
-                    if ui.button("Go").clicked() {
-                        if let Ok(tick) = self.tick_text.parse::<u64>() {
-                            actions.push(GuiAction::LoadTick(tick));
-                        }
+                }
+                if ui.button("Go").clicked() {
+                    if let Ok(tick) = self.tick_text.parse::<u64>() {
+                        actions.push(GuiAction::LoadTick(tick));
                     }
+                }
 
-                    // Navigation buttons
-                    ui.add_enabled_ui(!self.available_ticks.is_empty(), |ui| {
-                        if ui.button("|<").clicked() {
-                            actions.push(GuiAction::FirstTick);
-                        }
-                        if ui.button("<").clicked() {
-                            actions.push(GuiAction::PrevTick);
-                        }
-                        if ui.button(">").clicked() {
-                            actions.push(GuiAction::NextTick);
-                        }
-                        if ui.button(">|").clicked() {
-                            actions.push(GuiAction::LastTick);
-                        }
-                    });
-                    if ui.button("Reload").clicked() {
-                        actions.push(GuiAction::ReloadCurrent);
+                // Navigation buttons
+                ui.add_enabled_ui(!self.available_ticks.is_empty(), |ui| {
+                    if ui.button("|<").clicked() {
+                        actions.push(GuiAction::FirstTick);
                     }
-
-                    // Summary of loaded state
-                    if let Some(info) = loaded {
-                        ui.label(format!(
-                            "  |  {}×{}×{}  s_ext={}  {} cells",
-                            info.grid[0], info.grid[1], info.grid[2], info.s_ext, info.cell_count,
-                        ));
-                        if !self.available_ticks.is_empty() {
-                            ui.label(format!(
-                                "  ticks: {}",
-                                tick_list_summary(&self.available_ticks)
-                            ));
-                        }
-                    } else {
-                        ui.label("  |  No snapshot loaded");
+                    if ui.button("<").clicked() {
+                        actions.push(GuiAction::PrevTick);
+                    }
+                    if ui.button(">").clicked() {
+                        actions.push(GuiAction::NextTick);
+                    }
+                    if ui.button(">|").clicked() {
+                        actions.push(GuiAction::LastTick);
                     }
                 });
-                // Status bar (second row inside toolbar panel)
-                if !self.status.is_empty() {
-                    ui.horizontal(|ui| {
-                        if self.status_is_error {
-                            ui.colored_label(egui::Color32::RED, &self.status);
-                        } else {
-                            ui.label(&self.status);
-                        }
-                    });
+                if ui.button("Reload").clicked() {
+                    actions.push(GuiAction::ReloadCurrent);
+                }
+
+                // Summary of loaded state
+                if let Some(info) = loaded {
+                    ui.label(format!(
+                        "  |  {}×{}×{}  s_ext={}  {} cells",
+                        info.grid[0], info.grid[1], info.grid[2], info.s_ext, info.cell_count,
+                    ));
+                    if !self.available_ticks.is_empty() {
+                        ui.label(format!(
+                            "  ticks: {}",
+                            tick_list_summary(&self.available_ticks)
+                        ));
+                    }
+                } else {
+                    ui.label("  |  No snapshot loaded");
                 }
             });
-
-            // Left view settings panel
-            #[allow(deprecated)]
-            egui::SidePanel::left("marl_view_settings")
-                .resizable(false)
-                .default_width(220.0)
-                .show(ctx, |ui| {
-                    egui::CollapsingHeader::new("View Settings")
-                        .default_open(false)
-                        .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.label("Species:");
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut self.draft_species)
-                                        .desired_width(40.0),
-                                );
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label("View:");
-                                egui::ComboBox::from_id_salt("view_mode")
-                                    .selected_text(self.draft_view_mode.as_str())
-                                    .show_ui(ui, |ui| {
-                                        for mode in ViewMode::all() {
-                                            ui.selectable_value(
-                                                &mut self.draft_view_mode,
-                                                mode,
-                                                mode.as_str(),
-                                            );
-                                        }
-                                    });
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label("Cells:");
-                                egui::ComboBox::from_id_salt("cell_mode")
-                                    .selected_text(self.draft_cell_mode.as_str())
-                                    .show_ui(ui, |ui| {
-                                        for mode in CellMode::all() {
-                                            ui.selectable_value(
-                                                &mut self.draft_cell_mode,
-                                                mode,
-                                                mode.as_str(),
-                                            );
-                                        }
-                                    });
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label("Alpha:");
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut self.draft_cell_alpha)
-                                        .desired_width(50.0),
-                                );
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label("Scale:");
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut self.draft_density_scale)
-                                        .desired_width(50.0),
-                                );
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label("Exposure:");
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut self.draft_exposure)
-                                        .desired_width(50.0),
-                                );
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label("Steps:");
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut self.draft_steps)
-                                        .desired_width(50.0),
-                                );
-                            });
-                            ui.horizontal(|ui| {
-                                if ui.button("Apply").clicked() {
-                                    actions.push(GuiAction::ApplyViewSettings);
-                                }
-                                if ui.button("Reset").clicked() {
-                                    actions.push(GuiAction::ResetDraftFromLoaded);
-                                }
-                            });
+            // Status bar (second row inside toolbar panel)
+            if !self.status.is_empty() {
+                ui.horizontal(|ui| {
+                    if self.status_is_error {
+                        ui.colored_label(egui::Color32::RED, &self.status);
+                    } else {
+                        ui.label(&self.status);
+                    }
                 });
+            }
         });
+
+        // Left view settings panel
+        #[allow(deprecated)]
+        egui::SidePanel::left("marl_view_settings")
+            .resizable(false)
+            .default_width(220.0)
+            .show(ctx, |ui| {
+                egui::CollapsingHeader::new("View Settings")
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label("Species:");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.draft_species)
+                                    .desired_width(40.0),
+                            );
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("View:");
+                            egui::ComboBox::from_id_salt("view_mode")
+                                .selected_text(self.draft_view_mode.as_str())
+                                .show_ui(ui, |ui| {
+                                    for mode in ViewMode::all() {
+                                        ui.selectable_value(
+                                            &mut self.draft_view_mode,
+                                            mode,
+                                            mode.as_str(),
+                                        );
+                                    }
+                                });
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Cells:");
+                            egui::ComboBox::from_id_salt("cell_mode")
+                                .selected_text(self.draft_cell_mode.as_str())
+                                .show_ui(ui, |ui| {
+                                    for mode in CellMode::all() {
+                                        ui.selectable_value(
+                                            &mut self.draft_cell_mode,
+                                            mode,
+                                            mode.as_str(),
+                                        );
+                                    }
+                                });
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Alpha:");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.draft_cell_alpha)
+                                    .desired_width(50.0),
+                            );
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Scale:");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.draft_density_scale)
+                                    .desired_width(50.0),
+                            );
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Exposure:");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.draft_exposure)
+                                    .desired_width(50.0),
+                            );
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Steps:");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.draft_steps)
+                                    .desired_width(50.0),
+                            );
+                        });
+                        ui.horizontal(|ui| {
+                            if ui.button("Apply").clicked() {
+                                actions.push(GuiAction::ApplyViewSettings);
+                            }
+                            if ui.button("Reset").clicked() {
+                                actions.push(GuiAction::ResetDraftFromLoaded);
+                            }
+                        });
+                    });
+            });
 
         actions
     }

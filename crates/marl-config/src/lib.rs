@@ -1,3 +1,8 @@
+//! Compile-time grid constants and runtime configuration for MARL.
+//!
+//! This crate has no simulation dependencies — it is a pure data crate
+//! consumed by every other crate in the workspace.
+
 // ============================================================================
 // GRID DIMENSIONS — compile-time constants
 // ============================================================================

@@ -1,5 +1,5 @@
-use crate::config::*;
 use crate::field::Field;
+use marl_config::*;
 use std::collections::HashMap;
 
 /// Light availability field. One scalar per voxel.

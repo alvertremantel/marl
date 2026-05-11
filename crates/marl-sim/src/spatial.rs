@@ -1,5 +1,5 @@
-use crate::config::{GRID_X, GRID_Y, GRID_Z, S_EXT, SimulationConfig};
-use crate::field::Field;
+use marl_config::{GRID_X, GRID_Y, GRID_Z, S_EXT, SimulationConfig};
+use marl_field::field::Field;
 use rand::Rng;
 use std::collections::HashMap;
 

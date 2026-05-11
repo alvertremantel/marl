@@ -37,7 +37,7 @@
 //!    - Energy < quiescence_energy → go dormant (skip effectors)
 //!    - Otherwise → active
 
-use crate::config::*;
+use marl_config::*;
 
 /// Receptor parameters: Hill-function sensor for an external chemical.
 ///

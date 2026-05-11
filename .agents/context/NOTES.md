@@ -1,5 +1,46 @@
 # MARL Implementation Notes
 
+## Engine Crate Decomposition (2026-05-10)
+
+### Durable decisions
+
+1. **`marl-config` keeps compile-time constants and runtime config together.**
+   Splitting them would create a circular dependency: runtime config types are parameterized by constants (arrays sized by `S_EXT`), and separating them means two crates with array-parameterized types flowing both ways. The combined crate is ~295 lines — small enough to be a leaf node consumed by everything.
+
+2. **`marl-cell` is the domain model crate.**
+   All cellular biology lives here: `CellState`, `Ruleset`, `Reaction`, all param types, `tick()`, `mutate()`, and HGT. It depends only on `marl-config` + `rand`/`rand_distr`. No simulation orchestration, no field access, no I/O.
+
+3. **`marl-field` owns the physical simulation layer.**
+   `Field` (chemical concentrations + CPU diffusion) and `LightField` (Beer-Lambert) share the same physics layer and config dependency. Keeping them together avoids an extra tiny crate.
+
+4. **`marl-sim` is the orchestration layer.**
+   The `run()` function contains the full tick loop from the old `main.rs`. Seeding, spatial utilities, starter metabolism factories, and stats printing are module files within this crate. `marl-sim` depends on `marl-output` for binary dumps, CSV logging, PPM snapshots, and run summaries.
+
+5. **`marl-output` is the I/O sidecar.**
+   Binary dumps, CSV diagnostics (`DataLogger`, `ReactionRegistry`), PPM snapshots, and run summaries. It depends on `marl-format` for the shared binary schema.
+
+6. **`marl-gpu` is its own crate (not a feature-gated module).**
+   The GPU diffusion prototype has unique heavy dependencies (`wgpu`). The engine binary and `marl-sim` use it via an optional dependency. The gpu feature is forwarded: `marl-engine --features gpu → marl-sim/gpu → dep:marl-gpu`.
+
+7. **`marl-engine` is now a pure binary crate (~10 lines).**
+   No library code remains. The binary loads config via `marl_config::Config::load()`, detects `--gpu-diffusion`, and calls `marl_sim::run(cfg, use_gpu)`.
+
+8. **`marl-format` remains unchanged.**
+   The shared binary schema crate was already separate. Both engine (via `marl-output`) and viewer use it.
+
+### Import conventions
+- `use marl_config::*` — for grid constants and config types
+- `use marl_cell::cell::{CellState, Ruleset, Reaction, ...}` — for cell types
+- `use marl_field::field::Field` — for the chemical field
+- `use marl_field::light::LightField` — for the light field
+- `use marl_output::binary_dump`, `use marl_output::data::DataLogger`, `use marl_output::snapshot` — for I/O
+- `use marl_gpu::GpuFieldDiffuser` — for GPU diffusion (behind `#[cfg(feature = "gpu")]`)
+
+### Gotchas
+- The WGSL shader constant duplication (`GRID_X=128`, etc.) remains a pre-existing issue. `GpuFieldDiffuser::new()` validates and returns `GpuError` if constants drift.
+- HGT is still implemented but disabled in the main loop.
+- GPU tests require the `gpu` feature on `marl-gpu`: `cargo test -p marl-gpu --features gpu`.
+
 ## Workspace Crate Decomposition (2026-04-25)
 
 ### Durable decisions

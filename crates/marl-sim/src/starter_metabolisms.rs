@@ -1,7 +1,7 @@
-use crate::cell::{
+use marl_cell::cell::{
     CellState, EffectorParams, FateParams, Reaction, ReceptorParams, Ruleset, TransportParams,
 };
-use crate::config::{M_INT, R_MAX, S_EFFECTORS, S_RECEPTORS, S_TRANSPORTERS};
+use marl_config::{M_INT, R_MAX, S_EFFECTORS, S_RECEPTORS, S_TRANSPORTERS};
 
 fn inactive_receptor() -> ReceptorParams {
     ReceptorParams {

@@ -1,8 +1,8 @@
 //! Raw binary outputs for high-throughput viewer ingestion.
 
-use crate::cell::CellState;
-use crate::config::*;
-use crate::field::Field;
+use marl_cell::cell::CellState;
+use marl_config::*;
+use marl_field::field::Field;
 use marl_format::{ENDIANNESS, FIELD_DTYPE, FIELD_LAYOUT, ViewerCellRecord, field_byte_len};
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};

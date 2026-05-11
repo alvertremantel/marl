@@ -1227,31 +1227,82 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
-name = "marl-engine"
-version = "0.3.1+1"
+name = "marl-cell"
+version = "0.4.0"
 dependencies = [
- "bytemuck",
- "marl-format",
- "pollster",
+ "marl-config",
  "rand",
  "rand_distr",
- "rayon",
+]
+
+[[package]]
+name = "marl-config"
+version = "0.4.0"
+dependencies = [
  "serde",
  "toml",
- "wgpu",
+]
+
+[[package]]
+name = "marl-engine"
+version = "0.4.0"
+dependencies = [
+ "marl-config",
+ "marl-sim",
+]
+
+[[package]]
+name = "marl-field"
+version = "0.4.0"
+dependencies = [
+ "marl-config",
+ "rayon",
 ]
 
 [[package]]
 name = "marl-format"
-version = "0.3.1+1"
+version = "0.4.0"
 dependencies = [
  "serde",
  "serde_json",
 ]
 
 [[package]]
+name = "marl-gpu"
+version = "0.4.0"
+dependencies = [
+ "bytemuck",
+ "marl-config",
+ "marl-field",
+ "pollster",
+ "wgpu",
+]
+
+[[package]]
+name = "marl-output"
+version = "0.4.0"
+dependencies = [
+ "marl-cell",
+ "marl-config",
+ "marl-field",
+ "marl-format",
+]
+
+[[package]]
+name = "marl-sim"
+version = "0.4.0"
+dependencies = [
+ "marl-cell",
+ "marl-config",
+ "marl-field",
+ "marl-gpu",
+ "marl-output",
+ "rand",
+]
+
+[[package]]
 name = "marl-viewer-rs"
-version = "0.3.1+1"
+version = "0.4.0"
 dependencies = [
  "bytemuck",
  "egui",

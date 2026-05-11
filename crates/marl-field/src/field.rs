@@ -1,4 +1,4 @@
-use crate::config::*;
+use marl_config::*;
 use rayon::prelude::*;
 
 /// 3D chemical concentration field.

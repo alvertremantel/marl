@@ -1,0 +1,11 @@
+[package]
+name = "marl-gpu"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+marl-config = { path = "../marl-config" }
+marl-field = { path = "../marl-field" }
+bytemuck.workspace = true
+pollster.workspace = true
+wgpu.workspace = true

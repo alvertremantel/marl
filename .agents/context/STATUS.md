@@ -2,6 +2,50 @@
 
 ## Current Branch: tweak/outputs
 
+## Completed: Engine Crate Decomposition (2026-05-10)
+
+Decomposed the monolithic `crates/marl-engine` crate (~12 modules, one binary, one optional GPU feature) into 7 focused crates with a thin binary driving a clear dependency DAG.
+
+### New crate topology
+- `marl-config`: compile-time grid constants (`GRID_X`, `S_EXT`, etc.) + runtime `SimulationConfig`/`OutputConfig`/`Config` with `Config::load()` — zero simulation deps (295 lines)
+- `marl-cell`: cellular biology — `CellState`, `Ruleset`, `Reaction`, param types, 5-phase `tick()`, `mutate()`, HGT (552 lines)
+- `marl-field`: extracellular physics — `Field` (CPU diffusion, boundary sources, tests), `LightField` (Beer-Lambert attenuation) (373 lines)
+- `marl-sim`: simulation orchestration — `run()` (full tick loop), seeding, spatial helpers, starter metabolisms, stats printing (depends on `marl-output`) (475 lines + loop body)
+- `marl-output`: I/O sidecar — binary dumps, CSV diagnostics (`DataLogger`, `ReactionRegistry`), PPM snapshots, run summaries (1325 lines)
+- `marl-gpu`: optional GPU diffusion — `GpuFieldDiffuser`, `GpuContext`, WGSL shader, CPU/GPU equivalence tests (362 lines)
+- `marl-engine`: thin binary (~10 lines) — load config, call `marl_sim::run()`
+
+### Dependency DAG
+```
+marl-config        ← zero internal deps
+    ↓
+marl-cell          ← marl-config + rand + rand_distr
+marl-field         ← marl-config + rayon
+    ↓
+marl-sim           ← marl-config + marl-cell + marl-field + marl-output (+ optional marl-gpu)
+marl-output        ← marl-config + marl-cell + marl-field + marl-format
+marl-gpu           ← marl-config + marl-field + wgpu + bytemuck + pollster
+    ↓
+marl-engine (bin)  ← marl-sim (+ gpu feature forwarding)
+```
+
+### Verification
+- `cargo fmt --all`: passes
+- `cargo build --workspace --release`: zero errors, one pre-existing viewer warning
+- `cargo test --workspace`: 72 tests pass (2 marl-field, 11 marl-format, 1 marl-gpu, 2 marl-output, 56 marl-viewer-rs)
+- `cargo run -p marl-engine --release -- --ticks 50 --stats 10 --snapshot 100 --output /tmp/marl_smoke_test`: completes, produces run_meta.json, tick_0/49.{field,cells}.bin, summary.md
+- `cargo check -p marl-engine --features gpu`: passes
+- `cargo check -p marl-sim --features gpu`: passes
+- `cargo check -p marl-viewer-rs`: passes
+- `cargo check -p marl-gpu`: passes
+
+### Notes
+- `marl-engine` is now a pure binary crate; its old `lib.rs` and all moved modules have been removed
+- GPU feature is forwarded through: `marl-engine --features gpu → marl-sim/gpu → dep:marl-gpu`
+- The WGSL shader constant duplication remains a pre-existing issue outside this plan's scope
+- `marl-sim::run()` takes `Config` by value + a `use_gpu_diffusion: bool` flag, matching the old `main()` behavior
+- All previously public `pub` fields/types remain accessible through their new crate paths (e.g., `marl_cell::cell::CellState`, `marl_field::field::Field`)
+
 ## Completed: Viewer GUI Shell (2026-05-09)
 
 The standalone viewer now includes an `egui` GUI shell with directory loading, tick navigation, and view settings controls overlaid on the existing WGSL raymarch renderer.

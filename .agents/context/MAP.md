@@ -1,26 +1,48 @@
 # MARL Repo Map
 
 ## Cargo Workspace
-- `Cargo.toml`: virtual workspace manifest with `marl-engine`, `marl-viewer-rs`, and `marl-format` members
-- `crates/marl-engine/Cargo.toml`: simulation library plus `marl-engine` binary; optional `gpu` feature
-- `crates/marl-viewer-rs/Cargo.toml`: standalone viewer binary and windowing/GPU render dependencies
-- `crates/marl-format/Cargo.toml`: small shared format/schema crate
+- `Cargo.toml`: virtual workspace manifest with 9 crates under `crates/`
+- `crates/marl-config/`: compile-time grid constants + runtime `SimulationConfig`/`OutputConfig`/`Config` (zero simulation deps, only serde + toml)
+- `crates/marl-cell/`: cellular biology — `CellState`, `Ruleset`, `Reaction`, all param types, 5-phase `tick()`, `mutate()`, HGT (depends on `marl-config` + rand)
+- `crates/marl-field/`: extracellular physics — `Field` (CPU diffusion), `LightField` (Beer-Lambert attenuation) (depends on `marl-config` + rayon)
+- `crates/marl-sim/`: simulation orchestration — tick loop (`run()`), seeding, spatial helpers, starter metabolisms, stats printing (depends on `marl-config` + `marl-cell` + `marl-field` + `marl-output`; optional `marl-gpu`)
+- `crates/marl-output/`: I/O sidecar — binary dumps, CSV diagnostics (`DataLogger`, `ReactionRegistry`), PPM snapshots, run summaries (depends on `marl-config` + `marl-cell` + `marl-field` + `marl-format`)
+- `crates/marl-gpu/`: optional GPU diffusion — `GpuFieldDiffuser`, `GpuContext`, WGSL shader, CPU/GPU equivalence tests (depends on `marl-config` + `marl-field` + wgpu)
+- `crates/marl-engine/`: thin binary crate (~10 lines) — loads config, forwards to `marl_sim::run()`
+- `crates/marl-format/`: shared binary schema — `RunMeta`, `ViewerCellRecord`, field layout constants (unchanged, bridge between engine and viewer)
+- `crates/marl-viewer-rs/`: standalone `wgpu` viewer with `egui` GUI (depends on `marl-format` only)
 
-## Core Simulation
-- `crates/marl-engine/src/main.rs`: engine binary orchestration, tick loop, output cadence, CLI flag handling for GPU diffusion
-- `crates/marl-engine/src/sim/`: extracted simulation helpers for seeding, spatial neighbor logic, starter metabolisms, and stats printing
-- `crates/marl-engine/src/config.rs`: compile-time dimensions/species counts plus runtime `SimulationConfig` and `OutputConfig`
-- `crates/marl-engine/src/field.rs`: extracellular field storage, CPU diffusion, boundary sources, field tests
-- `crates/marl-engine/src/cell.rs`: cell state, rulesets, reactions, transport, fate, mutation
-- `crates/marl-engine/src/light.rs`: top-down light attenuation field
-- `crates/marl-engine/src/hgt.rs`: horizontal gene transfer helper, not currently wired into the main loop
+## Dependency DAG
+```
+marl-config        ← zero internal deps (serde + toml)
+    ↓
+marl-cell          ← depends on marl-config + rand + rand_distr
+marl-field         ← depends on marl-config + rayon
+    ↓
+marl-sim           ← depends on marl-config + marl-cell + marl-field + marl-output (+ optional marl-gpu)
+marl-output        ← depends on marl-config + marl-cell + marl-field + marl-format
+marl-gpu           ← depends on marl-config + marl-field + wgpu + bytemuck + pollster
+    ↓
+marl-engine (bin)  ← depends on marl-sim (+ forwards gpu feature to marl-sim)
+```
+
+## Simulation Code
+- `crates/marl-config/src/lib.rs`: compile-time dimensions/species counts plus runtime `SimulationConfig` and `OutputConfig` with `Config::load()`
+- `crates/marl-cell/src/cell.rs`: cell state, rulesets, reactions, transport, fate, mutation
+- `crates/marl-cell/src/hgt.rs`: horizontal gene transfer helper (not currently wired into the main loop)
+- `crates/marl-field/src/field.rs`: extracellular field storage, CPU diffusion, boundary sources, field tests
+- `crates/marl-field/src/light.rs`: top-down light attenuation field
+- `crates/marl-sim/src/lib.rs`: `run()` function — full tick loop (boundary sources → diffusion → light → cell updates → fate processing → logging/snapshots)
+- `crates/marl-sim/src/seeding.rs`: field boundary initialization and cell seeding
+- `crates/marl-sim/src/spatial.rs`: face-neighbor spatial utilities (empty neighbors, environment reading, division placement)
+- `crates/marl-sim/src/starter_metabolisms.rs`: phototroph, chemolithotroph, and anaerobe factory functions
+- `crates/marl-sim/src/stats.rs`: per-tick stats printing and final z-layer profile
 
 ## Output And Viewer Data
-- `crates/marl-engine/src/binary_dump.rs`: raw viewer files (`tick_<T>.field.bin`, `tick_<T>.cells.bin`) and `run_meta.json`
+- `crates/marl-output/src/binary_dump.rs`: raw viewer files (`tick_<T>.field.bin`, `tick_<T>.cells.bin`) and `run_meta.json`
+- `crates/marl-output/src/data.rs`: optional CSV diagnostics, reaction registry, end-of-run `summary.md`
+- `crates/marl-output/src/snapshot.rs`: optional PPM cross-sections, density maps, and ancestry maps
 - `crates/marl-format/`: shared binary schema constants, `RunMeta`, field byte-length helper, and packed `ViewerCellRecord`
-- `crates/marl-engine/src/data.rs`: optional CSV diagnostics, reaction registry, end-of-run `summary.md`
-- `crates/marl-engine/src/snapshot.rs`: optional PPM cross-sections, density maps, and ancestry maps
-- `marl.toml`: sample runtime config with binary outputs on and legacy diagnostics off by default
 
 ## Standalone Viewer
 - `crates/marl-viewer-rs/src/main.rs`: thin viewer binary entrypoint
@@ -33,9 +55,10 @@
 - `crates/marl-viewer-rs/src/viewer_raymarch.wgsl`: full-screen raymarch shader with isometric ray/AABB traversal, chemical field sampling, and cell voxel compositing
 
 ## GPU Prototype
-- `crates/marl-engine/src/gpu/`: optional `gpu` feature implementation for field diffusion
-- `crates/marl-engine/src/gpu/shaders/field_diffuse.wgsl`: WGSL compute shader with currently duplicated grid/species constants
-- `crates/marl-engine/tests/gpu_diffusion.rs`: CPU/GPU equivalence tests compiled when `gpu` feature is enabled
+- `crates/marl-gpu/src/context.rs`: GPU device/queue creation with error types
+- `crates/marl-gpu/src/field_diffusion.rs`: `GpuFieldDiffuser` with synchronous upload/dispatch/readback
+- `crates/marl-gpu/src/shaders/field_diffuse.wgsl`: WGSL compute shader with duplicated grid/species constants
+- `crates/marl-gpu/tests/gpu_diffusion.rs`: CPU/GPU equivalence tests (compiled with `gpu` feature on `marl-gpu`)
 
 ## Documentation And Agent Context
 - `README.md`: project landing page (overview, architecture, model choices, status, citation)
@@ -43,6 +66,7 @@
 - `docs/INFO.md`: deep technical characterization and architecture reference
 - `docs/SCRIPTS.md`: documentation for project utility scripts
 - `scripts/check_binary_dump.py`: quick binary output sanity checker
+- `marl.toml`: sample runtime config with binary outputs on and legacy diagnostics off by default
 - `.agents/plans/`: implementation plans
 - `.agents/context/STATUS.md`: current project status and completed work
 - `.agents/context/NOTES.md`: durable implementation decisions and gotchas

@@ -1,7 +1,13 @@
 [workspace]
 members = [
+    "crates/marl-cell",
+    "crates/marl-config",
     "crates/marl-engine",
+    "crates/marl-field",
     "crates/marl-format",
+    "crates/marl-gpu",
+    "crates/marl-output",
+    "crates/marl-sim",
     "crates/marl-viewer-rs",
 ]
 resolver = "3"

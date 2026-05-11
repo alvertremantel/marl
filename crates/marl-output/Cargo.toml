@@ -1,0 +1,10 @@
+[package]
+name = "marl-output"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+marl-config = { path = "../marl-config" }
+marl-cell = { path = "../marl-cell" }
+marl-field = { path = "../marl-field" }
+marl-format = { path = "../marl-format" }

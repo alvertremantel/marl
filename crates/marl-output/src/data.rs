@@ -20,10 +20,10 @@ use std::fs::{self, File};
 use std::io::{BufWriter, Result, Write};
 use std::path::PathBuf;
 
-use crate::cell::*;
-use crate::config::*;
-use crate::field::Field;
-use crate::light::LightField;
+use marl_cell::cell::*;
+use marl_config::*;
+use marl_field::field::Field;
+use marl_field::light::LightField;
 
 // ============================================================================
 // REACTION REGISTRY — stable IDs for every unique reaction topology
